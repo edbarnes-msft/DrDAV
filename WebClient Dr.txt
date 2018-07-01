@@ -1,0 +1,96 @@
+Input: URL of destination
+
+Parse out: scheme, port, computer name, site (root site) - http://www.powershellmagazine.com/2012/12/24/pstip-working-with-a-uniform-resource-identifier-uri-in-powershell/
+Get client OS and file versions
+	$(Get-CimInstance Win32_OperatingSystem).CSName
+	$(Get-CimInstance Win32_OperatingSystem).Caption
+	$(Get-CimInstance Win32_OperatingSystem).Version
+	"webclnt.dll "+$([System.IO.FileInfo] 'C:\Windows\System32\webclnt.dll').VersionInfo.ProductVersion
+	"davclnt.dll "+$([System.IO.FileInfo] 'C:\Windows\System32\davclnt.dll').VersionInfo.ProductVersion
+	"mrxdav.sys "+$([System.IO.FileInfo] 'C:\Windows\System32\Drivers\mrxdav.sys').VersionInfo.ProductVersion
+	"webio.dll "+$([System.IO.FileInfo] 'C:\Windows\System32\webio.dll').VersionInfo.ProductVersion
+	"winhttp.dll "+$([System.IO.FileInfo] 'C:\Windows\System32\winhttp.dll').VersionInfo.ProductVersion
+	"shell32.dll.dll "+$([System.IO.FileInfo] 'C:\Windows\System32\shell32.dll').VersionInfo.ProductVersion
+
+Delay
+	WebClient service spinup - 
+		(Get-Service | Where-Object {$_.name -eq "webclient"}).Status
+		(Get-Service | Where-Object {$_.name -eq "webclient"}).StartType
+	Failure to connect at TCP 445/139 - system.Net.Sockets.TcpClient
+		$smb = Test-NetConnection [[-ComputerName] <String>] -CommonTCPPort SMB -InformationLevel Quiet
+		$smb = Test-NetConnection www.bing.com -Port 445 -InformationLevel Quiet
+		Test-NetConnection www.bing.com -Port 80 -InformationLevel Quiet
+			$start = Get-Date
+			$smb = Test-NetConnection www.bing.com -Port 445 -InformationLevel Quiet
+			(New-TimeSpan $start $(Get-Date) ).Seconds
+
+	Network Provider HWOrder/Order - 
+		$ProviderCheck = ("," + (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\HwOrder").ProviderOrder +",").ToLower().Contains(",webclient,") -and ("," + (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\Order").ProviderOrder +",").ToLower().Contains(",webclient,")
+
+	Auto-detect proxy - Reg or https://msdn.microsoft.com/en-us/library/system.net.webproxy(v=vs.110).aspx
+	Long TTL
+
+Fail to connect
+	TLS version - System.Security.Authentication.SslProtocols
+		Server check - Test_Ssl_Protocol.ps1
+		Client check - https://support.microsoft.com/en-us/kb/3140245
+			[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp]
+			[HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp]
+			"DefaultSecureProtocols"=dword:00000800
+			HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols
+	OPTIONS blocked
+	PROPFIND blocked
+	Bad proxy settings
+
+Failure after connect
+	Auth - NTLM (AuthForwardServerList) - 401 response with WWW-Authenticate header of NTLM or Negotiate
+	Auth - Basic (no SSL) - 401 response with WWW-Authenticate header of Basic
+	Auth - FBA (missing cookie) - 403 response with X- error
+
+	PROPFIND results gzipped - 207 response with gzip Content-Encoded header
+	PROPFIND results XML missing - 200 or 207 response with wrong content body type/ body length of zero / failure to load body as XML
+	No DAV/perms at root or missing root site - 400/500 level error after 401 Auth handling at root site
+	Proxy requires authentication - 407 error
+	Custom header with space - iterate through headers checking for header name with a space
+
+
+
+
+https://msdn.microsoft.com/en-us/powershell/scripting/getting-started/cookbooks/working-with-registry-entries
+[enum]::GetNames([System.Security.Authentication.SslProtocols])
+
+Cookie activity:
+$url = "http://yosaffbridge.shinyverse.loc"
+$logonurl = "$($url)/_windows/default.aspx?ReturnUrl=%2f"
+
+$cookiejar = New-Object System.Net.CookieContainer 
+$webrequest = [System.Net.HTTPWebRequest]::Create($logonurl)
+$webrequest.AllowAutoRedirect = $false
+$webrequest.Method = "GET"
+$webrequest.UseDefaultCredentials = $true
+$webrequest.CookieContainer = $cookiejar 
+$response = $webrequest.GetResponse() 
+
+$cookies = $cookiejar.GetCookies($url) 
+     
+foreach ($cookie in $cookies) { 
+    if ($cookie.name -eq "FedAuth"){
+       $newcookie = "$($cookie.value)"
+       $newcookie = "$($newcookie); expires="
+       $newcookie = "$($newcookie)$(Get-Date $cookie.expires -format r)"
+       $newcookie = "$($newcookie); path=/;"
+       #if ($cookie.secure -eq $true){ $newcookie = "$($newcookie); secure"}
+        Write-Host "$($cookie.name) = $($newcookie)"
+        }
+}
+
+$MethodDefinition = @'
+    [DllImport("C:\\Windows\\System32\\wininet.dll", CharSet=CharSet.Auto, SetLastError=true)]
+    public static extern bool InternetSetCookie(string lpszUrl, string lpszCookieName, string lpszCookieData);
+'@
+$WinInet = Add-Type -MemberDefinition $MethodDefinition -Name 'WinInet' -Namespace 'Win32' -PassThru
+[Win32.WinInet]::InternetSetCookie($url, "FedAuth", $newcookie) 
+
+=============================================================================================
+
+https://www.petri.com/testing-uris-urls-powershell

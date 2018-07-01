@@ -1,0 +1,115 @@
+<?xml version="1.0" standalone="yes"?>
+<DocumentElement>
+  <AnalysisResult>
+    <Title>TCP Chimney is enabled and out of date.</Title>
+    <Status>Error</Status>
+    <Category>Configuration</Category>
+    <Explanation>&lt;pre&gt;An error was encountered when executing this rule. To help you determine the cause of this error, review the following callstack:
+Microsoft.Office.SharePoint.SPDiag.Snapshot.SnapshotCollectInfoException:The server name 'imail.ace.aaaclubnet.com' is wrong.&lt;BR&gt;   at Microsoft.Office.SharePoint.SPDiag.Snapshot.Collectors.WmiConnectionFactory.GetScope(String serverName, String nameSpace)
+   at Microsoft.Office.SharePoint.SPDiag.Snapshot.Wmi.WmiUtilities.GetWmiValue(String serverName, IDictionary`2 dict, String queryStringPart, String nameSpace)
+   at Microsoft.Office.SharePoint.SPDiag.Snapshot.ServerLocationCollector.GetSystemDriveLocation(String serverName)
+   at Microsoft.Office.SharePoint.SPDiag.Analysis.Rules.TcpChimneyEnabled.GetDriversUncPath(String serverName)
+   at Microsoft.Office.SharePoint.SPDiag.Analysis.Rules.TcpChimneyEnabled.Check()
+   at Microsoft.Office.SharePoint.SPDiag.Analysis.AnalysisTask.Worker_DoWork(Object sender, DoWorkEventArgs e)&lt;/pre&gt;</Explanation>
+    <Remedy>It is recommended that you install either KB950224 or a later version.  If you cannot install a patch at this time,you could disable TCP Chimney on all servers in your farm (including SQL) by running the command:&lt;br /&gt;&lt;br /&gt;&lt;b&gt;Windows 2003 Server&lt;/b&gt;&lt;br /&gt;Netsh int ip set chimney DISABLED&lt;br /&gt;&lt;br /&gt;&lt;b&gt;Windows 2008 Server&lt;/b&gt;&lt;br /&gt;netsh int tcp set global chimney=disabled&lt;br /&gt;</Remedy>
+  </AnalysisResult>
+  <AnalysisResult>
+    <Title>SQL servers are low on free disk space</Title>
+    <Status>Error</Status>
+    <Category>Availability</Category>
+    <Explanation>&lt;pre&gt;An error was encountered when executing this rule. To help you determine the cause of this error, review the following callstack:
+System.Data.SqlClient.SqlException:Cannot open database "WSS_Search_SA0MOSS04_" requested by the login. The login failed.
+Login failed for user 'AUTOCLUB\gid00111'.&lt;BR&gt;   at System.Data.SqlClient.SqlInternalConnection.OnError(SqlException exception, Boolean breakConnection)
+   at System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj)
+   at System.Data.SqlClient.TdsParser.Run(RunBehavior runBehavior, SqlCommand cmdHandler, SqlDataReader dataStream, BulkCopySimpleResultSet bulkCopyHandler, TdsParserStateObject stateObj)
+   at System.Data.SqlClient.SqlInternalConnectionTds.CompleteLogin(Boolean enlistOK)
+   at System.Data.SqlClient.SqlInternalConnectionTds.AttemptOneLogin(ServerInfo serverInfo, String newPassword, Boolean ignoreSniOpenTimeout, Int64 timerExpire, SqlConnection owningObject, Boolean withFailover)
+   at System.Data.SqlClient.SqlInternalConnectionTds.LoginNoFailover(String host, String newPassword, Boolean redirectedUserInstance, SqlConnection owningObject, SqlConnectionString connectionOptions, Int64 timerStart)
+   at System.Data.SqlClient.SqlInternalConnectionTds.OpenLoginEnlist(SqlConnection owningObject, SqlConnectionString connectionOptions, String newPassword, Boolean redirectedUserInstance)
+   at System.Data.SqlClient.SqlInternalConnectionTds..ctor(DbConnectionPoolIdentity identity, SqlConnectionString connectionOptions, Object providerInfo, String newPassword, SqlConnection owningObject, Boolean redirectedUserInstance)
+   at System.Data.SqlClient.SqlConnectionFactory.CreateConnection(DbConnectionOptions options, Object poolGroupProviderInfo, DbConnectionPool pool, DbConnection owningConnection)
+   at System.Data.ProviderBase.DbConnectionFactory.CreatePooledConnection(DbConnection owningConnection, DbConnectionPool pool, DbConnectionOptions options)
+   at System.Data.ProviderBase.DbConnectionPool.CreateObject(DbConnection owningObject)
+   at System.Data.ProviderBase.DbConnectionPool.UserCreateRequest(DbConnection owningObject)
+   at System.Data.ProviderBase.DbConnectionPool.GetConnection(DbConnection owningObject)
+   at System.Data.ProviderBase.DbConnectionFactory.GetConnection(DbConnection owningConnection)
+   at System.Data.ProviderBase.DbConnectionClosed.OpenConnection(DbConnection outerConnection, DbConnectionFactory connectionFactory)
+   at System.Data.SqlClient.SqlConnection.Open()
+   at Microsoft.Office.SharePoint.SPDiag.Analysis.Rules.SqlServersAreTooLowOnDiskSpace.CheckDb(SPDatabase db, Dictionary`2 driveSpace)
+   at Microsoft.Office.SharePoint.SPDiag.Analysis.Rules.SqlServersAreTooLowOnDiskSpace.Check()
+   at Microsoft.Office.SharePoint.SPDiag.Analysis.AnalysisTask.Worker_DoWork(Object sender, DoWorkEventArgs e)&lt;/pre&gt;</Explanation>
+    <Remedy>Examine the drives containing the specified databases' log and data files. Free space on these drives or move the database files to another drive. A drive should have enough free space for the largest database file on it to autogrow twice.</Remedy>
+  </AnalysisResult>
+  <AnalysisResult>
+    <Title>Large lists exist beyond recommendations.</Title>
+    <Status>Error</Status>
+    <Category>Performance</Category>
+    <Explanation>&lt;pre&gt;An error was encountered when executing this rule. To help you determine the cause of this error, review the following callstack:
+Microsoft.Office.SharePoint.SPDiag.Snapshot.SnapshotCollectInfoException:Sql Error&lt;BR&gt;   at Microsoft.Office.SharePoint.SPDiag.SharePointWrapper.SharePointHelper.GetLargeLists(SPWebApplication app)
+   at Microsoft.Office.SharePoint.SPDiag.Analysis.Rules.LargeListsDetected.Check()
+   at Microsoft.Office.SharePoint.SPDiag.Analysis.AnalysisTask.Worker_DoWork(Object sender, DoWorkEventArgs e)&lt;/pre&gt;</Explanation>
+    <Remedy>Restructure the list(s) above by either archiving/removing old data (a records repository may help), segmenting into multiple lists, or creating a folder structure such that there is no folder with more than 2000 items in it that makes sense for the data.  It also may be worth considering a custom event receiver to either block end users from adding more than 2000 items or automatically scaling into folders when that limit is reached.</Remedy>
+  </AnalysisResult>
+  <AnalysisResult>
+    <Title>Content Database is larger than 100GB and contains multiple site collections.</Title>
+    <Status>Failed</Status>
+    <Category>Performance</Category>
+    <Explanation>Content databases that have grown over 100GB and have multiple site collections are known to cause performance issues.  The following content databases meet these conditions:&lt;PRE&gt;WSS_Content_Customers (SharePoint, 3 site collections, 897,242 MB)
+WSS_Content_Customers_0006 (SharePoint, 2 site collections, 826,983 MB)
+&lt;/PRE&gt;</Explanation>
+    <Remedy>Prevent new sites from being added to the databases listed above by setting the warning and maximum sites size to the current number of sites.  This will force new sites to be created in a content database not at its maximum(create a new one if there is not another content database). Then you can use stsadm -o mergecontentdb or stsadm -o backup/restore to relocate the site collections that you choose to in the databases listed above.</Remedy>
+  </AnalysisResult>
+  <AnalysisResult>
+    <Title>One or more web applications do not have access to a content database</Title>
+    <Status>Failed</Status>
+    <Category>Security</Category>
+    <Explanation>&lt;p&gt;autoclub\GID00111, the process identity account used for the SharePoint web application should be listed as DBO on configured content databases to ensure proper product functionality. It is detected that on the following content database(s) do not list this account as the DBO account directly: &lt;br /&gt;&lt;pre&gt;WSS_Content_Customers_0003&lt;/pre&gt;&lt;/p&gt;</Explanation>
+    <Remedy>Open SQL Management Studio, Expand the database(s) listed above, expand Security, Expand Users, and select the properties of dbo.  
+Change the dbo account to the appropriate account listed above, and add a new User with DBO rights for the account that was listed as the dbo previously.</Remedy>
+  </AnalysisResult>
+  <AnalysisResult>
+    <Title>SharePoint servers are low on free disk space.</Title>
+    <Status>Failed</Status>
+    <Category>Availability</Category>
+    <Explanation>Requests can fail if a drive fills completely. This rule checks SharePoint farm servers local disks and looks for disks that do not have (Physical Memory * 2) and (Physical Memory * 5) in free disk space.   The thresholds are:
+  &lt;ul&gt;FAIL = FREESPACE &amp;lt;= (Physical Memory * 2)&lt;/ul&gt;
+&lt;ul&gt;WARNING = (Physical Memory * 2) &amp;lt; FREESPACE &amp;lt;= (Physical Memory * 5)&lt;/ul&gt;
+&lt;ul&gt;PASS = (Physical Memory * 5) &amp;lt;= FREESPACE&lt;/ul&gt;
+&lt;br /&gt;
+These multipliers are aggressively set to help ensure proactive disk space management.   The following drives have resulted in a Failed result:&lt;pre&gt;SA0SP103 Failed drive(s):&lt;BR&gt;D: = 22,399 MB
+SA0SP104 Failed drive(s):&lt;BR&gt;C: = 12,821 MB
+SA0CLIPAPP101 Warning drive(s):&lt;BR&gt;C: = 18,192 MB
+D: = 23,286 MB
+SA0CLIPAPP102 Warning drive(s):&lt;BR&gt;C: = 19,879 MB
+D: = 24,468 MB
+SA0SP103 Warning drive(s):&lt;BR&gt;C: = 25,264 MB
+&lt;/pre&gt;</Explanation>
+    <Remedy>Examine the failing servers and delete old logs or free space on the drives listed above.</Remedy>
+  </AnalysisResult>
+  <AnalysisResult>
+    <Title>The server farm account should not be used for other services</Title>
+    <Status>Failed</Status>
+    <Category>Security</Category>
+    <Explanation>autoclub\gid00111, the account used for the SharePoint timer service and the central administration site, is highly privileged and should not be used for any other services on any machines in the server farm.&amp;nbsp; The following services/application pools were found to also use this account:&lt;BR&gt;&lt;PRE&gt;ACE - 52050 (Application Pool)
+Customers - 52052 (Application Pool)
+MySites - 52060 (Application Pool)
+SSP - 52080 (Application Pool)
+OSearch (Windows Service)
+SPSearch (Windows Service)&lt;/PRE&gt;</Explanation>
+    <Remedy>Browse to &lt;a href="http://sa0sp103:52100/_admin/FarmCredentialManagement.aspx" target="_blank"&gt;http://sa0sp103:52100/_admin/FarmCredentialManagement.aspx&lt;/a&gt; and change the account used for the services listed in the explanation. Search services should be updated from &lt;a href="http://sa0sp103:52100/_admin/Server.aspx" target="_blank"&gt;http://sa0sp103:52100/_admin/Server.aspx&lt;/a&gt;. Content access accounts that are also using this account should be updated from their respective management UI. You may want to refer to KB article - &lt;a href="http://support.microsoft.com/kb/934838" target="_blank"&gt;http://support.microsoft.com/kb/934838&lt;/a&gt;.</Remedy>
+  </AnalysisResult>
+  <AnalysisResult>
+    <Title>SharePoint Tracing Service is Offline.</Title>
+    <Status>Passed</Status>
+    <Category>Availability</Category>
+    <Explanation>All servers have a running tracing service (SPTrace).&lt;BR&gt;</Explanation>
+    <Remedy>Ensure that the server(s) listed above are running and connected to the network. If the tracing service is not started, restart the service by typing the following command at the command prompt on each server: &lt;pre&gt;net start SPTrace&lt;/pre&gt;If the server was intentionally removed from the farm, remove the record of the server from the SharePoint topology in the Central Administration site at &lt;a href="http://sa0sp103:52100/_admin/FarmServers.aspx"  target="_blank"&gt;http://sa0sp103:52100/_admin/FarmServers.aspx&lt;/a&gt;.</Remedy>
+  </AnalysisResult>
+  <AnalysisResult>
+    <Title>SharePoint Timer Service is Offline.</Title>
+    <Status>Passed</Status>
+    <Category>Availability</Category>
+    <Explanation>All servers have a running timer service.</Explanation>
+    <Remedy>Ensure that the server(s) listed above are running and connected to the network. If the timer service is not started, restart the service by typing the following command at the command prompt on each server: &lt;pre&gt;net start SPTimerV3&lt;/pre&gt;If the server was intentionally removed from the farm, remove the record of the server from the SharePoint topology in the Central Administration site at &lt;a href="http://sa0sp103:52100/_admin/FarmServers.aspx"  target="_blank"&gt;http://sa0sp103:52100/_admin/FarmServers.aspx&lt;/a&gt;</Remedy>
+  </AnalysisResult>
+</DocumentElement>
