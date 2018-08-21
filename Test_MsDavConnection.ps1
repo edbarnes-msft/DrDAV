@@ -1,7 +1,11 @@
 ﻿$testurl = "http://www.myserver.com"
-$outputverbose = $false
-$logfile = $env:TEMP+"\_DavTest_"+$env:COMPUTERNAME+"_"+(Get-Date -Format yyddMMhhmm)+".log"
+[void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
+$testurl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the target web folder", "Web Address", $testurl)
 
+$logfile = $env:TEMP+"\_DavTest_"+$env:COMPUTERNAME+"_"+(Get-Date -Format yyddMMhhmm)+".log"
+#$logfile = [Microsoft.VisualBasic.Interaction]::InputBox("Specify the logging file", "Log File", $logfile)
+
+$outputverbose = $false
 
 $MethodDefinition = @'
     [DllImport("C:\\Windows\\System32\\wininet.dll", CharSet=CharSet.Auto, SetLastError=true)]
