@@ -1,38 +1,124 @@
-﻿$testurl = "http://www.myserver.com"
+﻿$deftesturl = "http://www.myserver.com"
+#$deftesturl = "https://www.bing.com"
+
 [void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
-$testurl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the target web folder", "Web Address", $testurl)
+[uri] $testurl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the target web folder", "Web Address", $deftesturl)
 
 $logfile = $env:TEMP+"\_DavTest_"+$env:COMPUTERNAME+"_"+(Get-Date -Format yyddMMhhmm)+".log"
 #$logfile = [Microsoft.VisualBasic.Interaction]::InputBox("Specify the logging file", "Log File", $logfile)
 
 $outputverbose = $false
 
-$MethodDefinition = @'
+$WebClientTestSrc = @'
+    [DllImport("ieframe.dll", CharSet = CharSet.Auto)]
+    static extern int IEIsProtectedModeURL(string pszUrl);   
+    public static int GetProtectedMode(string url)
+    {
+        return IEIsProtectedModeURL(url);
+    }
     [DllImport("C:\\Windows\\System32\\wininet.dll", CharSet=CharSet.Auto, SetLastError=true)]
-    public static extern bool InternetSetCookie(string lpszUrl, string lpszCookieName, string lpszCookieData);
+    static extern bool InternetSetCookie(string lpszUrl, string lpszCookieName, string lpszCookieData);
     [DllImport("C:\\Windows\\System32\\wininet.dll", CharSet=CharSet.Auto, SetLastError=true)]
-    public static extern bool InternetGetCookieEx(string pchURL, string pchCookieName, System.Text.StringBuilder pchCookieData, ref System.UInt32 pcchCookieData, int dwFlags, IntPtr lpReserved);
+    static extern bool InternetGetCookieEx(string pchURL, string pchCookieName, System.Text.StringBuilder pchCookieData, ref System.UInt32 pcchCookieData, int dwFlags, IntPtr lpReserved);
     public static string GetCookieString(string url)
     {
         // Determine the size of the cookie      
         UInt32 datasize = 256*1024;
         System.Text.StringBuilder cookieData = new System.Text.StringBuilder(Convert.ToInt32(datasize));
-        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00002000, IntPtr.Zero))
+        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00001000, IntPtr.Zero))
         {
         if (datasize < 0)
             return null;
         // Allocate stringbuilder large enough to hold the cookie    
         cookieData = new System.Text.StringBuilder(Convert.ToInt32(datasize));
-        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00002000, IntPtr.Zero))
+        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00001000, IntPtr.Zero))
             return null;
         }
         return cookieData.ToString();
     }
-'@
-$WinInet = Add-Type -MemberDefinition $MethodDefinition -Name 'WinInet' -Namespace 'Win32' -PassThru 
+
+// referencing values from https://github.com/libgit2/libgit2/blob/master/deps/winhttp/winhttp.h
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern IntPtr WinHttpOpen( [MarshalAs(UnmanagedType.LPWStr)] string pwszAgent, int   dwAccessType,
+            [MarshalAs(UnmanagedType.LPWStr)] string pwszProxy, [MarshalAs(UnmanagedType.LPWStr)] string pwszProxyBypass, int dwFlags );
+
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern IntPtr WinHttpOpenRequest( IntPtr hConnect, [MarshalAs(UnmanagedType.LPWStr)] string pwszVerb, [MarshalAs(UnmanagedType.LPWStr)] string pwszObjectName,
+            [MarshalAs(UnmanagedType.LPWStr)] string pwszVersion, [MarshalAs(UnmanagedType.LPWStr)] string pwszReferrer, ref byte[] ppwszAcceptTypes, int dwFlags);
+
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern IntPtr WinHttpConnect(IntPtr hSession, [MarshalAs(UnmanagedType.LPWStr)] string pswzServerName, short nServerPort, int dwReserved);
+
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern bool WinHttpSetOption( IntPtr hInternet, int dwOption, byte[] lpBuffer, int dwBufferLength );
+
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern bool WinHttpSendRequest( IntPtr hRequest, string pwszHeaders, int dwHeadersLength, string lpOptional, uint dwOptionalLength, uint dwTotalLength, int dwContext );
+
+    [DllImport("winhttp.dll", SetLastError=true)]
+    static extern bool WinHttpReceiveResponse(IntPtr hRequest, int lpReserved);
+
+    [DllImport("winhttp.dll", SetLastError=true)]
+    static extern bool WinHttpCloseHandle(IntPtr hInternet);
+
+    static int WINHTTP_FLAG_SECURE = 0x00800000;
+    static int WINHTTP_OPTION_SECURE_PROTOCOLS = 84;
+    public static int WINHTTP_FLAG_SECURE_PROTOCOL_SSL3 = 0x00000020;    // decimal 32
+    public static int WINHTTP_FLAG_SECURE_PROTOCOL_TLS1 = 0x00000080;    // decimal 128
+    public static int WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_1 = 0x00000200;  // decimal 512
+    public static int WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 = 0x00000800;  // decimal 2048
+
+    static int WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = 0;
+    //static int WINHTTP_ACCESS_TYPE_NO_PROXY = 1;
+    //static int WINHTTP_ACCESS_TYPE_NAMED_PROXY = 3;
+
+    static int WINHTTP_OPTION_SECURITY_FLAGS = 31;
+    static int SECURITY_FLAG_IGNORE_UNKNOWN_CA = 0x00000100;
+    static int SECURITY_FLAG_IGNORE_CERT_DATE_INVALID = 0x00002000;
+    static int SECURITY_FLAG_IGNORE_CERT_CN_INVALID = 0x00001000;
+    static int SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE = 0x00000200;
+    static int SECURITY_FLAG_IGNORE_ALL = SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_IGNORE_CERT_DATE_INVALID|SECURITY_FLAG_IGNORE_CERT_CN_INVALID|SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
+
+    static byte[] WINHTTP_DEFAULT_ACCEPT_TYPES = null;
+    static string WINHTTP_NO_ADDITIONAL_HEADERS = null;
+    static string WINHTTP_NO_REQUEST_DATA = null;
+    static string WINHTTP_NO_REFERER = null;
+    static string WINHTTP_NO_PROXY_NAME = null;
+    static string WINHTTP_NO_PROXY_BYPASS = null;
+
+    public static int TestSsl(string url, short port, int ssl, bool bIgnoreBadCert)
+    {
+        int iResult = 0;
+        IntPtr hSession = WinHttpOpen("WinHTTP SSL Test", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if( hSession != null ) {
+            IntPtr hConnect = WinHttpConnect( hSession, url, port, 0 );
+            if( hConnect != null ) {
+                IntPtr hRequest = WinHttpOpenRequest( hConnect, "GET", "/", null, WINHTTP_NO_REFERER, ref WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+                if (!WinHttpSetOption( hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, BitConverter.GetBytes(ssl), sizeof(int) )) Console.WriteLine( "Failed to set SSL");
+                if ( bIgnoreBadCert ) {
+                    if (!WinHttpSetOption( hRequest, WINHTTP_OPTION_SECURITY_FLAGS, BitConverter.GetBytes(SECURITY_FLAG_IGNORE_ALL), sizeof(int) )) Console.WriteLine( "Failed to set Ignore Bad Cert");
+                    };
+                if (!WinHttpSendRequest( hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0 ) ){
+                    iResult = Marshal.GetLastWin32Error();
+                    Console.Write( "The request returned error {0}. ", iResult);
+                    };
+                if( hRequest != null ) WinHttpCloseHandle( hRequest );
+                };
+            if( hConnect != null ) WinHttpCloseHandle( hConnect );
+            if( hSession != null ) WinHttpCloseHandle( hSession );
+        };
+        return iResult;
+    }
+'@ 
+
+Add-Type -MemberDefinition $WebClientTestSrc  -Namespace WebClientTest -Name WinAPI 
+
 [System.Management.Automation.PSCredential] $altcreds = $null
 $auth_ntlm = $false; $auth_nego = $false; $auth_basic =$false; $auth_oauth = $false; $auth_fba = $false
-
+$dblbar = "======================================================"
+$wcshellminver7 = "6.1.7601.22498"; $wcminver7 = "6.1.7601.23542"; $winhttpminver7 = "6.1.7601.23375"
+$wcminver8GDR = "6.2.9200.17428"; $wcminver8LDR = "6.2.9200.21538"; $winhttpminver8 = "6.2.9200.21797"
+$wcminver81 = "6.3.9600.17923"
 
 function Test-MsDavConnection {
     [CmdletBinding()] 
@@ -43,8 +129,10 @@ function Test-MsDavConnection {
             )][uri]$WebAddress 
         )
     begin {
-        $os = $(Get-CimInstance Win32_OperatingSystem)
-        $osver = [int] ($os.Version.Split('.')[0] + $os.Version.Split('.')[1])
+        if ($PSVersionTable.PSVersion.Major -eq 2){ $osverstring = [environment]::OSVersion.Version.ToString() } 
+        else { $osverstring = $(Get-CimInstance Win32_OperatingSystem).Version }
+        $osver = [int] ([convert]::ToInt32($osverstring.Split('.')[0], 10) + [convert]::ToInt32($osverstring.Split('.')[1], 10))
+        $osname = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").ProductName
         $defaultNPO = ('RDPNP,LanmanWorkstation,webclient').ToLower()
         $WCfilesize = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").FileSizeLimitInBytes 
         $WCtimeout = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").SendReceiveTimeoutInSec  
@@ -52,37 +140,30 @@ function Test-MsDavConnection {
         $hnpo = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\HwOrder").ProviderOrder
         $WCBasicauth = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").BasicAuthLevel
         $WCAFSL = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").AuthForwardServerList
-        $protocols=[enum]::GetNames([System.Security.Authentication.SslProtocols])|?{$_ -notmatch 'none|default|ssl2'} #ssl3|tls|tls11|tls12
-        $WCuseragent = "Microsoft-WebDAV-MiniRedir/" + $os.Version
-        $SecurityProtocols = "TLS,TLS11,TLS12"
-        if ( ($osver -eq 61 ) -or ($osver -eq 62) ) { # https://support.microsoft.com/en-us/help/3140245
-            $SecurityProtocols = "SSL3,TLS"
-            $dsp = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols 
-            $dspwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols
-            Write-ToLog "WinHttp registry entry" 
-            if ($dsp -eq $null ) {Write-ToLog "absent" } else { Write-ToLog $dsp }
-            Write-ToLog "WinHttp WOW registry entry" 
-            if ($dspwow -eq $null ) {Write-ToLog "absent" } else { Write-ToLog $dspwow }           
-            $winhttpminver7 = "6.1.7601.23375"
-            $winiominver7 = "6.1.7601.23375"
-            $winhttpminver8 = "6.2.9200.21797"
-            $winiominver8 = "6.2.9200.21797"
-            $wcminver7 = "6.1.7601.23542"
-            $wcshellminver7 = "6.1.7601.22498"
-            }
+        if ($WCAFSL.length -eq 0 ) {$WCAFSL = "Not configured or empty" }
+        $sslprotocols=[string]::Join(" ",([enum]::GetNames([System.Security.Authentication.SslProtocols])|?{$_ -notmatch 'none|default|ssl2'} ) ) #ssl3|tls|tls11|tls12
+        $IgnoreBadCert = $true
+        $WCuseragent = "Microsoft-WebDAV-MiniRedir/" + $osverstring
+        $fso = New-Object -comobject Scripting.FileSystemObject
+        $Webclntdll = $fso.GetFileVersion('C:\Windows\System32\webclnt.dll')
+        $Davclntdll = $fso.GetFileVersion('C:\Windows\System32\davclnt.dll')
+        $Mrxdavsys = $fso.GetFileVersion('C:\Windows\System32\drivers\mrxdav.sys')
+        $Shell32dll = $fso.GetFileVersion('C:\Windows\System32\shell32.dll')
+        $WinHttpdll = $fso.GetFileVersion('C:\Windows\System32\winhttp.dll')
+        $WebIOdll =  $fso.GetFileVersion('C:\Windows\System32\webio.dll')
     }
 
     process {
         $MsDavConnection = @{
-            ClientName=$os.CSName
-            ClientOS = $os.Caption
-            ClientOSVersion = $os.Version
-            ClientWebIO=$([System.IO.FileInfo] 'C:\Windows\System32\webio.dll').VersionInfo.ProductVersion
-            ClientWinHttp=$([System.IO.FileInfo] 'C:\Windows\System32\winhttp.dll').VersionInfo.ProductVersion
-            ClientShell32=$([System.IO.FileInfo] 'C:\Windows\System32\shell32.dll').VersionInfo.ProductVersion
-            ClientWebclnt=$([System.IO.FileInfo] 'C:\Windows\System32\webclnt.dll').VersionInfo.ProductVersion
-            ClientDavclnt=$([System.IO.FileInfo] 'C:\Windows\System32\davclnt.dll').VersionInfo.ProductVersion
-            ClientMrxdav=$([System.IO.FileInfo] 'C:\Windows\System32\drivers\mrxdav.sys').VersionInfo.ProductVersion
+            ClientName=[environment]::MachineName
+            ClientOS = $osname
+            ClientOSVersion = $osverstring
+            ClientWebIO=$WebIOdll
+            ClientWinHttp=$WinHttpdll
+            ClientShell32=$Shell32dll
+            ClientWebclnt=$Webclntdll
+            ClientDavclnt=$Davclntdll
+            ClientMrxdav=$Mrxdavsys
             ClientNetProviders=$npo
             ServerName=$WebAddress.DnsSafeHost
             ServerPort=$WebAddress.Port
@@ -93,29 +174,112 @@ function Test-MsDavConnection {
             }    
 
             
-            foreach ($i in $MsDavConnection.GetEnumerator()) { Write-ToLog $($i.Key + " : " + $i.Value).ToString() }
-            Write-ToLog ("`n======================================================`n")
+            foreach ($i in $MsDavConnection.GetEnumerator()) { Write-ToLogVerbose $($i.Key + " : " + $i.Value).ToString() }
+            Write-Host "Microsoft WebClient Service Diagnostic check" -ForegroundColor Yellow -BackgroundColor DarkBlue
+            Write-Host ("Client Name =         " + [environment]::MachineName)
+            Write-Host ("OS =                  " + $osname)
+            Write-Host ("OS version =          " + $osverstring )
+            Write-Host "Webclnt.dll version ="$Webclntdll
+            Write-Host "Davclnt.dll version ="$Davclntdll
+            Write-Host "Mrxdav.sys version = "$Mrxdavsys
+            Write-Host "Shell32.dll version ="$Shell32dll
+            Write-Host "WinHttp.dll version ="$WinHttpdll
+            Write-Host "WebIO.dll version =  "$WebIOdll
+
+            Write-Host
+            if ($WebAddress.Host.Length -gt 0) {
+                Write-Host "TargetUrl ="$WebAddress
+                Write-Host "ServerName ="$WebAddress.DnsSafeHost
+                Write-Host "ServerPort ="$WebAddress.Port
+                Write-Host "ServerScheme ="$WebAddress.Scheme
+                Write-Host
+            }
+            Write-Host "Network Provider Order =`n`t"$npo
+            Write-Host "`nWebClient Parameters:`n`tBasicAuthLevel ="$WCBasicauth
+            Write-Host "`tAuthForwardServerList ="$WCAFSL
+ 
+
+            Write-ToLog ("`n" + $dblbar + "`n")
             
 
 # Fail to Connect
 #    1.	WebClient not installed or disabled
-            $WCSvc = Get-Service | where { $_.Name -eq 'webclient' }
-          if ($WCSvc -ne $null) 
+        $WCSvc = Get-Service | where { $_.Name -eq 'webclient' }
+        if ($WCSvc -ne $null) 
             { 
-                $WCStartType = $WCSvc.StartType 
+                $WCStartNum = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\services\WebClient").Start 
+                switch ($WCStartNum) {
+                "2"  { $WCStartType = "Automatic" }
+                "3"  { $WCStartType = "Manual" }
+                "4"  { $WCStartType = "Disabled" }
+                }
                 Write-ToLog ("The WebClient service StartUp type is: " + $WCStartType)
-              if ( ($WCStartType -ne [System.ServiceProcess.ServiceStartMode]::Manual ) -and
-                    ($WCStartType -ne [System.ServiceProcess.ServiceStartMode]::Automatic ) )
-                    { Write-ToLog "WebClient service Start Type should be set to Manual or Automatic." }
+                if ( ($WCStartType -ne "Manual" ) -and
+                    ($WCStartType -ne "Automatic" ) )
+                    { Write-ToLogWarning "WebClient service Start Type should be set to Manual or Automatic." }
                 Write-ToLog "Manual is default but Automatic is preferred if the service is used frequently"
             } 
             else
             {
                 Write-ToLog "WebClient service is not present"
             }
+# File version check
+        if ( ($WebAddress.Scheme -eq "https") -and (($osver -eq 7) -or ($osver -eq 8)) ){ # https://support.microsoft.com/en-us/help/3140245
+            if ($osver -eq 7) { 
+                if ( !((Check-Version $WinHttpdll $winhttpminver7 ) -and (Check-Version $WinHttpdll $winhttpminver7 )) ){ 
+                    Write-ToLogWarning ("WinHttp.Dll and WebIO.Dll should be updated to allow highest Secure Protocol versions - https://support.microsoft.com/en-us/help/3140245") 
+                    }
+                if ( !(Check-Version $Shell32dll $wcshellminver7 ) ){ Write-ToLogWarning ("Shell32.dll should be updated to address a known issue") }
+                if ( !((Check-Version $Webclntdll $wcminver7 ) -and (Check-Version $Davclntdll $wcminver7 ) -and (Check-Version $Mrxdavsys $wcminver7 )) ){ 
+                    Write-ToLogWarning ("The WebClient files should be updated to allow highest Secure Protocol versions") 
+                    }
+                }
+            if ($osver -eq 8) { 
+                if ( !((Check-Version $WinHttpdll $winhttpminver8 ) -and (Check-Version $WinHttpdll $winhttpminver8 )) ){ 
+                    Write-ToLogWarning ("WinHttp.Dll and WebIO.Dll should be updated to allow highest Secure Protocol versions - https://support.microsoft.com/en-us/help/3140245") 
+                    }
+                if ( [convert]::ToInt32($Webclntdll.Split('.')[0], 10) -lt 20000 ) {
+                    if ( !((Check-Version $Webclntdll $wcminver8GDR ) -and (Check-Version $Davclntdll $wcminver8GDR )) ){ 
+                        Write-ToLogWarning ("The WebClient files should be updated to allow highest Secure Protocol versions") 
+                        }
+                    } 
+                    else {
+                        if ( !((Check-Version $Webclntdll $wcminver8LDR ) -and (Check-Version $Davclntdll $wcminver8LDR )) ){ 
+                            Write-ToLogWarning ("The WebClient files should be updated to allow highest Secure Protocol versions") 
+                        }
+                    }
+                }
+            if ($osver -eq 8) { 
+                if ( !((Check-Version $Webclntdll $wcminver81 ) -and (Check-Version $Davclntdll $wcminver81 )) ){ 
+                            Write-ToLogWarning ("The WebClient files should be updated to allow highest Secure Protocol versions") 
+                    }
+                }
+    
+            $dsp = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols
+            if ($dsp -eq $null ) {Write-ToLogWarning "WinHttp registry entry is absent" } else { Write-ToLog ("WinHttp registry entry is: " + $dsp.ToString('x2').ToUpper()) }
+            if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
+                $dspwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols
+                if ($dspwow -eq $null ) {Write-ToLogWarning "WinHttp WOW6432 registry entry is absent" } else { Write-ToLog ("WinHttp WOW6432 registry entry is: " + $dspwow.ToString('x2').ToUpper()) }
+                }                     
+            }
+
+        $strongcrypt = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319").SchUseStrongCrypto
+        if ($strongcrypt -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto registry entry is: " + $strongcrypt) }
+        if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
+            $strongcryptwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319").SchUseStrongCrypto
+            if ($strongcryptwow -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto WOW6432 registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto WOW6432 registry entry is: " + $strongcryptwow) }
+        }        
+              
+        $sysdeftlsver = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\.NETFramework\v2.0.50727").SchUseStrongCrypto
+        if ($sysdeftlsver -eq $null ) {Write-ToLogVerbose "SystemDefaultTlsVersions registry entry is absent" } else { Write-ToLogVerbose ("SystemDefaultTlsVersions registry entry is: " + $sysdeftlsver) }
+        if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
+            $sysdeftlsverwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v2.0.50727").SchUseStrongCrypto
+            if ($sysdeftlsverwow -eq $null ) {Write-ToLogVerbose "SystemDefaultTlsVersions WOW6432 registry entry is absent" } else { Write-ToLogVerbose ("SystemDefaultTlsVersions WOW6432 registry entry is: " + $sysdeftlsverwow) }
+        }          
+      
 #    2.	Bad Network Provider order
 #        a.	WebClient missing from provider order
-            $npomsg = "Network Provider Order check: "
+            $npomsg = "`nNetwork Provider Order check: "
             $npocheck = 'Good'
           if ($npo.ToLower() -ne $hnpo.ToLower()) { 
                 $npocheck = 'HwOrder doesn''t match Order' 
@@ -132,59 +296,83 @@ function Test-MsDavConnection {
                 }
           if ( $npocheck -eq "Good") {Write-ToLog ($npomsg + $npocheck)}
 #    3.	Port blocked
+        if ($WebAddress.Host.Length -eq 0) {Exit}
         $starttime = Get-Date
-        if ($osver -eq 61 ) 
+        if ($osver -eq 7 ) 
         {
             # New-Object System.Net.Sockets.TcpClient($WebAddress.DnsSafeHost,$WebAddress.Port)
             $ns = New-Object system.net.sockets.tcpclient
             try { $ns.Connect($WebAddress.DnsSafeHost, $WebAddress.Port ) } catch {}
-            $testtime = (New-TimeSpan $starttime $(Get-Date) ).Seconds
+            $rtt = (New-TimeSpan $starttime $(Get-Date) ).Milliseconds
             if( $ns.Connected) {$testconnection = $true; $ns.Close()}
             $davport = "Win7: "
         } 
         else 
         { 
             $testconnection = (Test-NetConnection $WebAddress.DnsSafeHost -Port $WebAddress.Port -InformationLevel Quiet)
-            $testtime = (New-TimeSpan $starttime $(Get-Date) ).Seconds
+            $rtt = (New-TimeSpan $starttime $(Get-Date) ).Milliseconds
         }
         $davport = $davport + "Connection to " + $WebAddress.DnsSafeHost + " on port " + $WebAddress.Port + " was " 
-        if ($testconnection -eq $true ) { $davport = $davport + "successful and took " + $testtime + " seconds" }
-        else { $davport = $davport + "not successful"}
+        if ($testconnection -eq $true ) { $davport = $davport + "successful and took " + $rtt + " milliseconds" }
+        else { $davport = $davport + "not successful"; $rtt=0}
         Write-ToLog $davport
+
+# Internet Settings Security Zone information
+        $IEZone = [System.Security.Policy.Zone]::CreateFromUrl($WebAddress).SecurityZone
+        $IEPMode = [WebClientTest.WinAPI]::GetProtectedMode($WebAddress)
+        if ( $IEPMode -eq 0 ) {$ProtectMode = "Enabled"}
+        elseif ( $IEPMode -eq 1 ) {$ProtectMode = "Not Enabled"}
+        else {$ProtectMode = "Unknown"}
+
+        Write-ToLog ("$WebAddress is in the $IEZone Security Zone and Protect Mode value is " + $ProtectMode + "`n")
+        
+        $ActiveXCheck = $(Get-Item -Path ("HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\" + $IEZone.value__)).GetValue('1200')
+        if ( $ActiveXCheck -eq 0 ) {$ActiveXEnabled = "Enabled"}
+        elseif ( $ActiveXCheck -eq 1 ) {$ActiveXEnabled = "Prompt"}
+        elseif ( $ActiveXCheck -eq 3 ) {$ActiveXEnabled = "Disabled"}
+        else {$ActiveXEnabled = "Unknown"}
+        Write-ToLogVerbose ("Checking if ActiveX is enabled. Value identified: " + $ActiveXEnabled +"`n")
+      
 #    3.	Version of SSL/TLS not supported by server
+        if ( ($testconnection -eq $true) -and ($WebAddress.Scheme -eq "https") ) {
+            $ServerProtocolsAccepted = $null; [int] $iBestSsl = 0;
+            if ([WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, 32, $IgnoreBadCert ) -eq 0 ) 
+                { Write-ToLogVerbose "The server supports SSL3"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " SSL3" ; $iBestSsl = 32 } 
+            else { Write-ToLog "The server does not support SSL3" }
+
+            if ([WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, 128, $IgnoreBadCert ) -eq 0 ) 
+                { Write-ToLogVerbose "The server supports TLS 1.0"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS1" ; $iBestSsl = 128 } 
+            else { Write-ToLog "The server does not support TLS 1.0" }
+
+            if ([WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, 512, $IgnoreBadCert ) -eq 0 ) 
+                { Write-ToLogVerbose "The server supports TLS 1.1"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS11" ; $iBestSsl = 512 } 
+            else { Write-ToLog "The server does not support TLS 1.1" }
+
+            if ([WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, 2048, $IgnoreBadCert ) -eq 0 ) 
+                { Write-ToLogVerbose "The server supports TLS 1.2"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS12" ; $iBestSsl = 2048 } 
+            else { Write-ToLog "The server does not support TLS 1.2" }
+
+            if ($ServerProtocolsAccepted -eq $null) {Write-ToLog "No attempted protocols succeeded"}
+            else {$ServerProtocolsAccepted = $ServerProtocolsAccepted.Substring(1); Write-ToLog ( "Server supports: " + $ServerProtocolsAccepted.ToUpper() ) }
+
+            Write-ToLog ("Secure Protocols enabled for .Net: " + $sslprotocols.ToUpper() ) 
+
 #    4.	Certificate is expired or doesn't match
-          if ( ($testconnection -eq $true) -and ($WebAddress.Scheme -eq "https") ) {
-                $ServerProtocolsAccepted = $null
-                $RemoteCertificate = $null
-                foreach($protocol in $protocols){   
-                   try {
-                        $Socket = New-Object System.Net.Sockets.Socket('Internetwork','Stream', 'Tcp')
-                        $Socket.Connect($WebAddress.DnsSafeHost, $WebAddress.Port)
-                        $NetStream = New-Object System.Net.Sockets.NetworkStream($Socket, $true)
-                        $SslStream = New-Object System.Net.Security.SslStream($NetStream, $true)
-                        $SslStream.AuthenticateAsClient($WebAddress.DnsSafeHost,  $null, $protocol, $false )
-                      if ($RemoteCertificate -eq $null ) {
-                            $RemoteCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]$SslStream.RemoteCertificate
-                            }
-                      if ($ServerProtocolsAccepted -eq $null){ $ServerProtocolsAccepted = $protocol}
-                        else {$ServerProtocolsAccepted = $ServerProtocolsAccepted + ", " + $protocol}
-                        Write-ToLogVerbose ("Protocol: " + $protocol)
-                    } 
-                    catch {
-                        Write-ToLogVerbose ($protocol + " failed")
-                    }
-                    finally {
-                       if ($SslStream -ne $null) { $SslStream.Close()}
+            if ($iBestSsl -gt 0 ) {
+                $certcheck = [WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, $iBestSsl, $false )
+                if ($certcheck -eq 0 ) 
+                    { Write-ToLogVerbose "No certificate problem observed"} 
+                else { 
+                    switch ($certcheck ) {
+                        "12037"  { Write-ToLog "Certificate Error Invalid Date" }
+                        "12038"  { Write-ToLog "Certificate Error Invalid Common Name" }
+                        "12044"  { Write-ToLog "Client Authentication Certificate Needed" }
+                        "12045"  { Write-ToLog "Certificate CA is Invalid" }
+                        "12169"  { Write-ToLog "Invalid Certificate" }      
+                        "12179"  { Write-ToLog "Invalid Usage for Certificate" }                    
+                        }
                     }
                 }
-              if ($ServerProtocolsAccepted -eq $null) {Write-ToLog "No attempted protocols succeeded"}
-                else { Write-ToLog ("Server supports: " + $ServerProtocolsAccepted.ToUpper() ) }
-              if ( $RemoteCertificate -ne $null ) {
-                    Write-ToLogVerbose ("Certificate valid: " + $RemoteCertificate.Verify())
-                    Write-ToLogVerbose ("Certificate issued to: " + $RemoteCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false))
-                    Write-ToLogVerbose ("Certificate not good before: " + $RemoteCertificate.NotBefore )
-                    Write-ToLogVerbose ("Certificate not good after: " + $RemoteCertificate.NotAfter )
-                    }
                 # Optional To-Do - Check cert chain
             }
 
@@ -198,6 +386,7 @@ function Test-MsDavConnection {
 #    1.	Failing Authentication
           #if (($WebAddress.Scheme -eq "https") -and ($ServerProtocolsAccepted -eq $null)) {$testconnection = $false}
         if ( $testconnection ) {
+            Write-ToLog ("`n`n" + $dblbar + "`nDetermining authentication mode")
             $verb = "HEAD"
             $followredirect = $false
             $addcookies = $false
@@ -205,7 +394,7 @@ function Test-MsDavConnection {
             $maxtry = 5
             do {
                 $responseresult = SendWebRequest -url $WebAddress -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
-                Write-ToLog ("`nResult:" + $responseresult)
+                Write-ToLog ("Result: " + $responseresult)
                 switch ($responseresult ) {
                     "SwitchToGET" { $verb = "GET" }
                     "AddCookies"  { $addcookies = $true }
@@ -230,19 +419,15 @@ function Test-MsDavConnection {
           if ($global:auth_basic) { Write-ToLogVerbose ("BasicAuthLevel " + $WCBasicauth ) }
 
 #        c.	Claims/FBA - No persistent cookie passed
-            $IEZone = [System.Security.Policy.Zone]::CreateFromUrl($WebAddress).SecurityZone
-            $IEZoneNum = $IEZone.value__
-            $ProtectMode = $(Get-Item -Path ("HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\" + $IEZoneNum)).GetValue('2500')
 
-            if ($ProtectMode.Length -eq 0) { $ProtectMode = "Default"}
-            Write-ToLog ("$WebAddress is in the $IEZone Security Zone and Protect Mode value is " + $ProtectMode)
 #            i.	Cookie not created persistent
 #            ii.	Cookie not stored in shareable location
-            $persistentcookies = [Win32.WinInet]::GetCookieString($WebAddress) 
+            $persistentcookies = [WebClientTest.WinAPI]::GetCookieString($WebAddress) 
             Write-ToLogVerbose ("Persistent cookies for " + $WebAddress + " :`n" + $persistentcookies   )
 
 #    2.	OPTIONS and/or PROPFIND verb blocked
-            Write-ToLog "`nCheck if OPTIONS or PROPFIND are blocked"
+        if ( $testconnection ) {
+            Write-ToLog ("`n`n" + $dblbar + "`nCheck if OPTIONS or PROPFIND are blocked")
             $verb = "OPTIONS"
             $responseresult = SendWebRequest -url $WebAddress -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
             $verb = "PROPFIND"
@@ -257,16 +442,34 @@ function Test-MsDavConnection {
 #        a.	No DAV at root
 #        b.	No permissions at root
 #        c.	Root site missing 
-            Write-ToLog "Checking root site access`n"
+            Write-ToLog ("`n`n" + $dblbar + "`nChecking root site access")
             $verb = "PROPFIND"
             $rootweb = $WebAddress.Scheme + "://" + $WebAddress.DnsSafeHost
             $responseresult = SendWebRequest -url $rootweb -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
+        }
 
 
-Exit $LASTEXITCODE
 #
 # Performance
-#    1.	Slow to connect
+            Write-ToLog ("`n`n" + $dblbar + "`nPerformance considerations`n" + $dblbar)
+#    1.	Uploads fail to complete or are very slow
+#        a.	PUT requests are blocked
+#        b.	File exceeds file size limit
+            Write-ToLog ("Current setting of FileSizeLimitInBytes is: " + $WCfilesize.ToString("N0") + " bytes")
+#        c.	Upload takes longer than the Timeout setting
+            Write-ToLog ("`tUpload throughput is limited to approximately (Filesize / 8kb * RTT)" )
+            if ($rtt -gt 0 ) {
+                Write-ToLog ("`tCurrent Round Trip Time estimate is: " + $rtt + " milliseconds")
+                $WCesttimeupload = ($WCfilesize / 8192 * $rtt)
+                Write-ToLog ("`tEstimated time needed to upload a max file size of " +  $WCfilesize.ToString("N0") + " bytes: " + ($WCesttimeupload/1000).ToString("N0") + " seconds" )
+            }
+            else { Write-ToLog "`tUnable to determine RTT. Consider using PsPing from SysInternals to find the RTT" }
+
+            Write-ToLog ("The current client setting for SendReceiveTimeoutInSec is: " + $WCtimeout )
+
+Exit $LASTEXITCODE
+
+#    2.	Slow to connect
 #        a.	Auto-detect proxy unnecessarily selected
             Write-ToLogVerbose "`nTODO: Auto-detect proxy`n"
 #        b.	SMB attempts receive no response before falling through to WebClient
@@ -283,31 +486,12 @@ Exit $LASTEXITCODE
 #        c.	The WebClient service was not already started
           if ($WCStartType -ne "Automatic") { Write-ToLog "For best performance, set the StartUp Type to 'Automatic'" }
 
-#    2.	Slow to browse
+#    3.	Slow to browse
             Write-ToLogVerbose "TODO: Check browsing performance scenarios`n"
 
 #        a.	Read-Only Win32 attribute on SharePoint folders can cause unnecessary PROPFIND on contents.
 #        b.	Too many items in the destination folder will result in slow response in Windows Explorer (may appear empty)
 
-#    3.	Uploads fail to complete or are very slow
-#        a.	PUT requests are blocked
-#        b.	File exceeds file size limit
-            Write-ToLog ("Current setting of FileSizeLimitInBytes is: " + $WCfilesize + " bytes")
-#        c.	Upload takes longer than the Timeout setting
-            Write-ToLog ("Upload throughput is limited to Filesize / 8kb * RTT " )
-          if ( $testconnection ) {
-              if (!((ping $WebAddress.DnsSafeHost -n 2 | Out-String ).Contains("Received = 0")) ) {
-                    $rtt = (Test-Connection -ComputerName $WebAddress.DnsSafeHost | Measure-Object -Property ResponseTime -Average).Average | Out-Null
-                  if ($rtt -gt 0 ) {
-                        Write-ToLogVerbose ("Current Round Trip Time estimate is: " + $rtt + " milliseconds")
-                        $WCesttimeupload = ($WCfilesize / 8192 * $rtt)
-                        Write-ToLogVerbose ("Estimated time needed to upload a max file size of " +  $WCfilesize + " bytes: " + ($WCesttimeupload/1000) + " seconds" )
-                        }
-                    else { Write-ToLogVerbose "Unable to determine RTT. Consider using PsPing from SysInternals to find the RTT" }
-                }
-                else { Write-ToLogVerbose "Unable to use PING to determine RTT. Consider using PsPing from SysInternals to find the RTT" }
-            }
-            Write-ToLog ("The current setting for SendReceiveTimeoutInSec is: " + $WCtimeout )
 
 
 #        return New-Object PsObject -Property $MsDavConnection
@@ -320,13 +504,14 @@ Exit $LASTEXITCODE
 
 function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $includecookies = $false, $follow302=$true, [string] $usecreds)
 {
-    Write-ToLog ("`n======================================================")
-    Write-ToLog ($url + " " + $verb + " " + $useragent + " Cookies:" + $includecookies + " Follow302:" + $follow302 + " CredType:" + $usecreds)
+    Write-ToLog ($dblbar + "`n" + $verb + " test")
+    Write-ToLog ("`t" + $url + " UserAgent: " + $useragent + " Cookies:" + $includecookies + " Follow302:" + $follow302 + " CredType:" + $usecreds)
+    #Write-ToLog ($dblbar)
     [net.httpWebRequest] $req = [net.webRequest]::Create($url)
 	$req.AllowAutoRedirect = $follow302
 	$req.Method = $verb
     if ( $useragent -ne $null ) {$req.UserAgent = $useragent}
-    if ( $includecookies -eq $true ) {$cookiesread = $([Win32.WinInet]::GetCookieString($url)).Split(";")}
+    if ( $includecookies -eq $true ) {$cookiesread = $([WebClientTest.WinAPI]::GetCookieString($url)).Split(";")}
 
     $jar = New-Object System.Net.CookieContainer
     if ($cookiesread.count -gt 0) {
@@ -337,7 +522,7 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
             $c.Value = $cookie.Substring($cookie.IndexOf("=") + 1)
             $cc.Add($c)
         }
-        foreach ($c in $cc) { Write-ToLog ($c.tostring()) }
+        foreach ($c in $cc) { Write-ToLogVerbose ($c.tostring()) }
         $jar.Add($url, $cc)
     }
     $req.CookieContainer = $jar
@@ -366,24 +551,24 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
         }
     }
 
-    Write-ToLog ("Request Headers:")
-    foreach ($h in $req.Headers) { Write-ToLog ("`t" + $h + ": " + $req.Headers.GetValues($h)) }
+    Write-ToLogVerbose ("Request Headers:")
+    foreach ($h in $req.Headers) { Write-ToLogVerbose ("`t" + $h + ": " + $req.Headers.GetValues($h)) }
 
     if ($res -ne $null)
     {
-        Write-ToLog ("`nResponse:" + $verb + " " + $res.StatusCode.value__)
-        Write-ToLog ("Response Cookies: " + $res.Cookies.Count)
-        foreach ($c in $res.Cookies) { Write-ToLog ("`t" + $c.Name + " " + $c.Value) }
+        Write-ToLog ("Response Status Code: " + $res.StatusCode.value__ + " " + $res.StatusCode)
+        Write-ToLogVerbose ("Response Cookies: " + $res.Cookies.Count)
+        foreach ($c in $res.Cookies) { Write-ToLogVerbose ("`t" + $c.Name + " " + $c.Value) }
 
-        Write-ToLog ("Response Headers: " + $res.Headers.Count)
+        Write-ToLogVerbose ("Response Headers: " + $res.Headers.Count)
         foreach ($h in $res.Headers)
         {
             
             switch -Wildcard($h){
                 "WWW-Authenticate" { 
-                    Write-ToLog ("`t" + $h )
+                    Write-ToLogVerbose ("`t" + $h )
                     foreach ($a in $res.Headers.GetValues($h)) {
-                        Write-ToLog "`t`t"$a
+                        Write-ToLogVerbose "`t`t"$a
                         if ($a -like "NTLM*") { $global:auth_ntlm = $true }
                         if ($a -like "Nego*") { $global:auth_nego = $true }
                         if ($a -like "Basic*") { $global:auth_basic = $true }
@@ -392,24 +577,24 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
                         }
                     Break
                     }
-                "MicrosoftSharePointTeamServices" { Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "MicrosoftSharePointTeamServices" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "Set-Cookie" { 
-                    Write-ToLog ("`t" + $h)
+                    Write-ToLogVerbose ("`t" + $h)
                     foreach ($c in $res.Headers.GetValues($h)) {
-                        Write-ToLog ("`t`t" + $c)
+                        Write-ToLogVerbose ("`t`t" + $c)
                         }
                     Break
                     }
-                "Allow" { Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "Date" { Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "Location" { Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "Content-Type" { Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "Content-Encoding" { Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "request-id" { Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Allow" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Date" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Location" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Content-Type" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Content-Encoding" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "request-id" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 # X-MSDAVEXT_Error: 917656; Access+denied.+Before+opening+files+in+this+location%2c+you+must+first+browse+to+the+web+site+and+select+the+option+to+login+automatically.
-                "X-MSDAVEXT_Error" { $global:auth_fba = $true ; Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "X-FORMS_BASED_AUTH_REQUIRED" { $global:auth_fba = $true ; Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "FORMS_BASED_AUTH_RETURN_URL" { $global:auth_fba = $true ; Write-ToLog ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "X-MSDAVEXT_Error" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "X-FORMS_BASED_AUTH_REQUIRED" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "FORMS_BASED_AUTH_RETURN_URL" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "*" { Write-ToLogVerbose ("`t? " + $h + ": " + $res.Headers.GetValues($h))}
             }
         }
@@ -417,7 +602,8 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
         if ( ($verb -eq "PROPFIND") -and (($statcode -eq 200) -or ($statcode -eq 207) ) ) { ReturnBody($res) }
 
         $res.Close()
-    }
+    } 
+
     #Set StatusCheck
     $statuscheck = $null
     if ($statcode -eq 404 ) {
@@ -445,7 +631,6 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
 }
 
 
-
 function ReturnBody($response)
 {
   if ($response.ContentLength -ge 0) {
@@ -457,15 +642,34 @@ function ReturnBody($response)
 
 }
 
-function Write-ToLog ()
+function Check-Version($tval, $bval)
+{  $t = $tval.Split("."); $b = $bval.Split(".")
+    if ($t[0] -ge $b[0]){
+        if ($t[1] -ge $b[1]){
+            if ($t[2] -ge $b[2]){
+                if ($t[3] -ge $b[3]){ return $true }
+            }
+        }
+    }
+    return $false
+}
+
+function Write-ToLog()
 {   param( $msg = "`n" )
     write-host $msg
     Add-Content $logfile -Value $msg
 }
-function Write-ToLogVerbose ()
+function Write-ToLogVerbose()
 {   param( $msg = "`n" )
     if ($global:outputverbose ) { Write-Verbose $msg}
     Add-Content $logfile -Value ("VERBOSE:`t"+$msg)
+}
+function Write-ToLogWarning()
+{   param( $msg = "`n" )
+    Write-Warning $msg
+    Add-Content $logfile -Value ($global:dblbar)
+    Add-Content $logfile -Value ("WARNING:`n`t"+$msg)
+    Add-Content $logfile -Value ($global:dblbar)
 }
 
 cls
