@@ -118,7 +118,7 @@ $auth_ntlm = $false; $auth_nego = $false; $auth_basic =$false; $auth_oauth = $fa
 $dblbar = "======================================================"
 $wcshellminver7 = "6.1.7601.22498"; $wcminver7 = "6.1.7601.23542"; $winhttpminver7 = "6.1.7601.23375"
 $wcminver8GDR = "6.2.9200.17428"; $wcminver8LDR = "6.2.9200.21538"; $winhttpminver8 = "6.2.9200.21797"
-$wcminver81 = "6.3.9600.17923"
+$wcminver81 = "6.3.9600.17923"; $wcrecver10 = "10.0.16299.334"
 
 function Test-MsDavConnection {
     [CmdletBinding()] 
@@ -140,7 +140,7 @@ function Test-MsDavConnection {
         $hnpo = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\HwOrder").ProviderOrder
         $WCBasicauth = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").BasicAuthLevel
         $WCAFSL = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").AuthForwardServerList
-        if ($WCAFSL.length -eq 0 ) {$WCAFSL = "Not configured or empty" }
+        if ($WCAFSL.length -eq 0 ) {$WCAFSLOut = "Not configured or empty" } else { $WCAFSLOut = $WCAFSL } 
         $sslprotocols=[string]::Join(" ",([enum]::GetNames([System.Security.Authentication.SslProtocols])|?{$_ -notmatch 'none|default|ssl2'} ) ) #ssl3|tls|tls11|tls12
         $IgnoreBadCert = $true
         $WCuseragent = "Microsoft-WebDAV-MiniRedir/" + $osverstring
@@ -169,7 +169,7 @@ function Test-MsDavConnection {
             ServerPort=$WebAddress.Port
             ServerScheme=$WebAddress.Scheme
             TargetUrl=$WebAddress
-            AuthForwardServerList = $WCAFSL
+            AuthForwardServerList = $WCAFSLOut
             BasicAuthLevel=$WCBasicauth
             }    
 
@@ -221,7 +221,7 @@ function Test-MsDavConnection {
             } 
             else
             {
-                Write-ToLog "WebClient service is not present"
+                Write-ToLogWarning "WebClient service is not present"
             }
 # File version check
         if ( ($WebAddress.Scheme -eq "https") -and (($osver -eq 7) -or ($osver -eq 8)) ){ # https://support.microsoft.com/en-us/help/3140245
@@ -249,7 +249,7 @@ function Test-MsDavConnection {
                         }
                     }
                 }
-            if ($osver -eq 8) { 
+            if ($osver -eq 9) { 
                 if ( !((Check-Version $Webclntdll $wcminver81 ) -and (Check-Version $Davclntdll $wcminver81 )) ){ 
                             Write-ToLogWarning ("The WebClient files should be updated to allow highest Secure Protocol versions") 
                     }
@@ -283,11 +283,11 @@ function Test-MsDavConnection {
             $npocheck = 'Good'
           if ($npo.ToLower() -ne $hnpo.ToLower()) { 
                 $npocheck = 'HwOrder doesn''t match Order' 
-                Write-ToLog ($npocheck +"`n`tOrder: " + $npo + "`n`tHwOrder: " + $hnpo)
+                Write-ToLogWarning ($npocheck +"`n`tOrder: " + $npo + "`n`tHwOrder: " + $hnpo)
                 }
           if ( !("," + $hnpo +",").ToLower().Contains(",webclient,") -or !("," + $npo +",").ToLower().Contains(",webclient,") ) {
                 $npocheck = 'WebClient is missing from provider list' 
-                Write-ToLog ($npomsg + $npocheck + "`n`tOrder: " + $npo )
+                Write-ToLogWarning ($npomsg + $npocheck + "`n`tOrder: " + $npo )
                 }
 #        b.	Third-party providers interfering
           if ( ($npocheck -eq "Good") -and ($npo.ToLower() -ne $defaultnpo.ToLower()) ) { 
@@ -295,8 +295,15 @@ function Test-MsDavConnection {
                 Write-ToLog ($npomsg + $npocheck + "`n`tOrder: " + $npo )
                 }
           if ( $npocheck -eq "Good") {Write-ToLog ($npomsg + $npocheck)}
-#    3.	Port blocked
+
+
         if ($WebAddress.Host.Length -eq 0) {Exit}
+#==========================================================================
+#    Only test below if WebAddress is passed
+
+        $rootweb = $WebAddress.Scheme + "://" + $WebAddress.DnsSafeHost; $matchfound = $false
+            
+#    3.	Port blocked
         $starttime = Get-Date
         if ($osver -eq 7 ) 
         {
@@ -373,7 +380,7 @@ function Test-MsDavConnection {
                         }
                     }
                 }
-                # Optional To-Do - Check cert chain
+                # Optional ToDo - Check cert chain
             }
 
 #    5.	Bad proxy settings
@@ -384,9 +391,8 @@ function Test-MsDavConnection {
 #
 # Failure after connect
 #    1.	Failing Authentication
-          #if (($WebAddress.Scheme -eq "https") -and ($ServerProtocolsAccepted -eq $null)) {$testconnection = $false}
         if ( $testconnection ) {
-            Write-ToLog ("`n`n" + $dblbar + "`nDetermining authentication mode")
+            Write-ToLog ("`n`n" + $dblbar + "`r`nDetermining authentication mode")
             $verb = "HEAD"
             $followredirect = $false
             $addcookies = $false
@@ -412,48 +418,78 @@ function Test-MsDavConnection {
             }
 
 #        a.	NTLM or Kerberos - AuthForwardServerList
-        if ($global:auth_ntlm -or $global:auth_nego) { 
-            Write-ToLogVerbose ("AuthForwardServerList " + $WCAFSL )
+            if (($global:auth_ntlm -or $global:auth_nego) -and ($testAFSL.Contains("."))) { 
+            Write-ToLog ("`n`n" + $dblbar + "`r`nWindows Authentication accepted with FQDN url : Testing AuthForwardServerList")
+                # Validate target url against AuthForwardServerList
+                if ($WCAFSL.length -eq 0 ) {Write-ToLogWarning ("AuthForwardServerList registry value is not configured or empty") }
+                    else { 
+                        $WCAFSL | ForEach-Object -Process {
+                                     if ( $rootweb -like $_ ) {
+                                        $matchfound = $true
+                                        Write-ToLog ("The path $rootweb was matched to " + $_ )
+                                        }
+                                     }
+                        if ( $matchfound -eq $false ) { Write-ToLogWarning ("The path $rootweb was not matched in AuthForwardServerList.") }
                 }
+                Write-ToLog ($dblbar + "`r`n`n")
+            }
 #        b.	Basic - not over SSL
-          if ($global:auth_basic) { Write-ToLogVerbose ("BasicAuthLevel " + $WCBasicauth ) }
+            if ($global:auth_basic) { 
+                Write-ToLog ("`n`n" + $dblbar + "`r`nBasic Authentication accepted : Testing BasicAuthLevel`r`n")                
+                switch ($WCBasicauth) {
+                "0"  {Write-ToLogWarning ("BasicAuthLevel is 0; use of Basic Authentication is disabled" ) }
+                "1"  {
+                        if ($WebAddress.Scheme -eq "http") {
+                            Write-ToLogWarning ("BasicAuthLevel is 1; use of Basic Authentication over HTTP is disabled" ) }
+                            else { Write-ToLog ("BasicAuthLevel is 1; use of Basic Authentication over HTTPS is enabled" ) }
+                        }
+                "2"  {Write-ToLogWarning ("BasicAuthLevel is 2; use of Basic Authentication is enabled for both HTTP and HTTPS - This could be a security risk" ) }
+                }
+                Write-ToLog ("Note: If Basic Authentication is allowed and used, there will always be a credential prompt`r`n" + $dblbar + "`r`n") 
+            }
 
 #        c.	Claims/FBA - No persistent cookie passed
-
+            if ($global:auth_fba) { 
+                Write-ToLog ("`n`n" + $dblbar + "`r`nFBA or SAML Claims Authentication accepted : Testing Persistent cookies`r`n") 
+                Write-ToLog ("This authentication mode requires a persistent, sharable authentication cookie be available") 
 #            i.	Cookie not created persistent
 #            ii.	Cookie not stored in shareable location
-            $persistentcookies = [WebClientTest.WinAPI]::GetCookieString($WebAddress) 
-            Write-ToLogVerbose ("Persistent cookies for " + $WebAddress + " :`n" + $persistentcookies   )
+                if ( $IEPMode -eq 0 ) {Write-ToLogWarning ("Protect Mode is enabled for the $IEZone Security Zone so Persistent cookies cannot be shared.")}
+                elseif ( $IEPMode -eq 1 )  {Write-ToLog ("Protect Mode is not enabled for the $IEZone Security Zone so Persistent cookies can be shared.")}
+                $persistentcookies = [WebClientTest.WinAPI]::GetCookieString($WebAddress) 
+                Write-ToLogVerbose ("Persistent cookies for " + $WebAddress + " :`r`n" + $persistentcookies )
+                Write-ToLog ( $dblbar + "`r`n")
+            }
 
 #    2.	OPTIONS and/or PROPFIND verb blocked
         if ( $testconnection ) {
-            Write-ToLog ("`n`n" + $dblbar + "`nCheck if OPTIONS or PROPFIND are blocked")
+            Write-ToLog ("`n`n" + $dblbar + "`r`nCheck if OPTIONS or PROPFIND are blocked")
             $verb = "OPTIONS"
             $responseresult = SendWebRequest -url $WebAddress -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
             $verb = "PROPFIND"
             $responseresult = SendWebRequest -url $WebAddress -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
 #    3.	PROPFIND returns bad results
-            Write-ToLogVerbose "TODO: Validate PROPFIND results`n"
 #        a.	XML missing
 #        b.	XML malformed/gzipped
+#        Checked on every PROPFIND response    
 #    4.	Custom header name with space 
 #        Checked each time headers are read  
 #    5.	Root site access
 #        a.	No DAV at root
 #        b.	No permissions at root
 #        c.	Root site missing 
-            Write-ToLog ("`n`n" + $dblbar + "`nChecking root site access")
+            Write-ToLog ("`n`r`n" + $dblbar + "`r`nChecking root site access")
             $verb = "PROPFIND"
-            $rootweb = $WebAddress.Scheme + "://" + $WebAddress.DnsSafeHost
             $responseresult = SendWebRequest -url $rootweb -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
         }
 
 
 #
 # Performance
-            Write-ToLog ("`n`n" + $dblbar + "`nPerformance considerations`n" + $dblbar)
+            Write-ToLog ("`n`n" + $dblbar + "`r`nPerformance considerations`r`n" + $dblbar)
 #    1.	Uploads fail to complete or are very slow
 #        a.	PUT requests are blocked
+            # TODO Test PUT
 #        b.	File exceeds file size limit
             Write-ToLog ("Current setting of FileSizeLimitInBytes is: " + $WCfilesize.ToString("N0") + " bytes")
 #        c.	Upload takes longer than the Timeout setting
@@ -467,21 +503,32 @@ function Test-MsDavConnection {
 
             Write-ToLog ("The current client setting for SendReceiveTimeoutInSec is: " + $WCtimeout )
 
-Exit $LASTEXITCODE
-
 #    2.	Slow to connect
 #        a.	Auto-detect proxy unnecessarily selected
             Write-ToLogVerbose "`nTODO: Auto-detect proxy`n"
 #        b.	SMB attempts receive no response before falling through to WebClient
-			$start = Get-Date
-			$smb = "SMB Connection is " + (Test-NetConnection $WebAddress.DnsSafeHost -Port 139 -InformationLevel Quiet)
-			$smb = $smb + " and took " + (New-TimeSpan $start $(Get-Date) ).Seconds + " seconds"
-            Write-ToLogVerbose $smb
+            Write-ToLog "`nTesting SMB connectivity - using UNC will try SMB before using WebDAV and can cause a delay if blocked improperly"
+
+            # New-Object System.Net.Sockets.TcpClient($WebAddress.DnsSafeHost,$WebAddress.Port)
+            $ns = New-Object system.net.sockets.tcpclient
 
 			$start = Get-Date
-			$smb2 = "SMB2 Connection is " + (Test-NetConnection $WebAddress.DnsSafeHost -Port 445 -InformationLevel Quiet)
-			$smb2 = $smb2 + " and took " + (New-TimeSpan $start $(Get-Date) ).Seconds + " seconds"
-            Write-ToLogVerbose $smb2
+            try { $ns.Connect($WebAddress.DnsSafeHost, 139 ) } catch {}
+            $smbresponsetime = (New-TimeSpan $starttime $(Get-Date) ).Seconds
+            $ns.Close()
+
+            $smb = "SMB test connection took " + $smbresponsetime + " seconds"
+			if ($smbresponsetime -gt 3) {Write-ToLogWarning ($smb) }
+            else { Write-ToLog ($smb) }
+
+			$start = Get-Date
+            try { $ns.Connect($WebAddress.DnsSafeHost, 445 ) } catch {}
+            $smb2responsetime = (New-TimeSpan $starttime $(Get-Date) ).Seconds
+            $ns.Close()
+
+            $smb2 = "SMB2 test connection took " + $smb2responsetime + " seconds"
+			if ($smb2responsetime -gt 3) {Write-ToLogWarning ($smb2) }
+            else { Write-ToLog ($smb2) }
 
 #        c.	The WebClient service was not already started
           if ($WCStartType -ne "Automatic") { Write-ToLog "For best performance, set the StartUp Type to 'Automatic'" }
@@ -504,7 +551,7 @@ Exit $LASTEXITCODE
 
 function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $includecookies = $false, $follow302=$true, [string] $usecreds)
 {
-    Write-ToLog ($dblbar + "`n" + $verb + " test")
+    Write-ToLog ($dblbar + "`r`n" + $verb + " test")
     Write-ToLog ("`t" + $url + " UserAgent: " + $useragent + " Cookies:" + $includecookies + " Follow302:" + $follow302 + " CredType:" + $usecreds)
     #Write-ToLog ($dblbar)
     [net.httpWebRequest] $req = [net.webRequest]::Create($url)
@@ -547,7 +594,7 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
         }
         else {
             $res = $null
-            Write-ToLog ( ($Error[0].Exception.InnerException).status)
+            Write-ToLogWarning ( ($Error[0].Exception.InnerException).status)
         }
     }
 
@@ -639,6 +686,17 @@ function ReturnBody($response)
         $body = $streamreader.ReadToEnd() 
         Add-Content $logfile -Value $body
     }
+    # Test if body is valid XML
+
+# Check for Load or Parse errors when loading the XML file
+    $xml = New-Object System.Xml.XmlDocument
+    try {
+        $xml.LoadXml($body)
+        Write-ToLog "PROPFIND response is valid XML"
+    }
+    catch [System.Xml.XmlException] {
+        Write-ToLogWarning "PROPFIND response is not valid XML: $($_.toString())"
+    }
 
 }
 
@@ -656,7 +714,7 @@ function Check-Version($tval, $bval)
 
 function Write-ToLog()
 {   param( $msg = "`n" )
-    write-host $msg
+    Write-Host $msg
     Add-Content $logfile -Value $msg
 }
 function Write-ToLogVerbose()
@@ -679,4 +737,4 @@ if ($outputverbose) {
 else { Test-MsDavConnection -WebAddress $testurl }
 
 
-Start-Process $env:windir + "\explorer.exe"  -ArgumentList $((Get-ChildItem $logfile).DirectoryName) 
+Start-Process ($env:windir + "\explorer.exe")  -ArgumentList $((Get-ChildItem $logfile).DirectoryName) 
