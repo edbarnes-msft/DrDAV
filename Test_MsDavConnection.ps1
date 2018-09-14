@@ -418,7 +418,7 @@ function Test-MsDavConnection {
             }
 
 #        a.	NTLM or Kerberos - AuthForwardServerList
-            if (($global:auth_ntlm -or $global:auth_nego) -and ($testAFSL.Contains("."))) { 
+            if (($global:auth_ntlm -or $global:auth_nego) -and ($rootweb.Contains("."))) { 
             Write-ToLog ("`n`n" + $dblbar + "`r`nWindows Authentication accepted with FQDN url : Testing AuthForwardServerList")
                 # Validate target url against AuthForwardServerList
                 if ($WCAFSL.length -eq 0 ) {Write-ToLogWarning ("AuthForwardServerList registry value is not configured or empty") }
