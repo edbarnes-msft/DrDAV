@@ -1,5 +1,5 @@
 ﻿$deftesturl = "http://www.myserver.com"
-#$deftesturl = "https://www.bing.com"
+$deftesturl = "https://www.bing.com"
 
 [void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
 [uri] $testurl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the target web folder", "Web Address", $deftesturl)
@@ -119,6 +119,7 @@ $dblbar = "======================================================"
 $wcshellminver7 = "6.1.7601.22498"; $wcminver7 = "6.1.7601.23542"; $winhttpminver7 = "6.1.7601.23375"
 $wcminver8GDR = "6.2.9200.17428"; $wcminver8LDR = "6.2.9200.21538"; $winhttpminver8 = "6.2.9200.21797"
 $wcminver81 = "6.3.9600.17923"; $wcrecver10 = "10.0.16299.334"
+$newlocation = ""
 
 function Test-MsDavConnection {
     [CmdletBinding()] 
@@ -171,6 +172,8 @@ function Test-MsDavConnection {
             TargetUrl=$WebAddress
             AuthForwardServerList = $WCAFSLOut
             BasicAuthLevel=$WCBasicauth
+            FileSizeLimitInBytes = $WCfilesize.ToString("N0")
+            SendReceiveTimeoutInSec = $WCtimeout.ToString("N0")
             }    
 
             
@@ -264,16 +267,23 @@ function Test-MsDavConnection {
             }
 
         $strongcrypt = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319").SchUseStrongCrypto
-        if ($strongcrypt -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto registry entry is: " + $strongcrypt) }
+        if ($strongcrypt -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto registry entry for v4 is: " + $strongcrypt) }
         if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
             $strongcryptwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319").SchUseStrongCrypto
-            if ($strongcryptwow -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto WOW6432 registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto WOW6432 registry entry is: " + $strongcryptwow) }
+            if ($strongcryptwow -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto WOW6432 registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto WOW6432 registry entry for v4 is: " + $strongcryptwow) }
+        }     
+           
+        $strongcrypt2 = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\.NETFramework\v2.0.50727").SchUseStrongCrypto
+        if ($strongcrypt2 -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto registry entry for v2 is: " + $strongcrypt2) }
+        if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
+            $strongcryptwow2 = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v2.0.50727").SchUseStrongCrypto
+            if ($strongcryptwow2 -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto WOW6432 registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto WOW6432 registry entry for v2 is: " + $strongcryptwow2) }
         }        
               
-        $sysdeftlsver = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\.NETFramework\v2.0.50727").SchUseStrongCrypto
+        $sysdeftlsver = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\.NETFramework\v2.0.50727").SystemDefaultTlsVersions
         if ($sysdeftlsver -eq $null ) {Write-ToLogVerbose "SystemDefaultTlsVersions registry entry is absent" } else { Write-ToLogVerbose ("SystemDefaultTlsVersions registry entry is: " + $sysdeftlsver) }
         if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
-            $sysdeftlsverwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v2.0.50727").SchUseStrongCrypto
+            $sysdeftlsverwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v2.0.50727").SystemDefaultTlsVersions
             if ($sysdeftlsverwow -eq $null ) {Write-ToLogVerbose "SystemDefaultTlsVersions WOW6432 registry entry is absent" } else { Write-ToLogVerbose ("SystemDefaultTlsVersions WOW6432 registry entry is: " + $sysdeftlsverwow) }
         }          
       
@@ -297,7 +307,7 @@ function Test-MsDavConnection {
           if ( $npocheck -eq "Good") {Write-ToLog ($npomsg + $npocheck)}
 
 
-        if ($WebAddress.Host.Length -eq 0) {Exit}
+        if ($WebAddress.Host.Length -eq 0) {Start-Process ($env:windir + "\explorer.exe")  -ArgumentList $((Get-ChildItem $logfile).DirectoryName) ;Exit}
 #==========================================================================
 #    Only test below if WebAddress is passed
 
@@ -333,29 +343,41 @@ function Test-MsDavConnection {
 
         Write-ToLog ("$WebAddress is in the $IEZone Security Zone and Protect Mode value is " + $ProtectMode + "`n")
         
-        $ActiveXCheck = $(Get-Item -Path ("HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\" + $IEZone.value__)).GetValue('1200')
+        $ActiveXCheck = $(Get-Item -Path ("HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\" + $IEZone.value__)).GetValue('2000')
         if ( $ActiveXCheck -eq 0 ) {$ActiveXEnabled = "Enabled"}
         elseif ( $ActiveXCheck -eq 1 ) {$ActiveXEnabled = "Prompt"}
         elseif ( $ActiveXCheck -eq 3 ) {$ActiveXEnabled = "Disabled"}
         else {$ActiveXEnabled = "Unknown"}
-        Write-ToLogVerbose ("Checking if ActiveX is enabled. Value identified: " + $ActiveXEnabled +"`n")
+        Write-ToLogVerbose ("Checking if ActiveX is enabled. Value identified: " + $ActiveXEnabled)
+
+        if ((Test-Path ("HKCU:\Software\Policies\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\" + $IEZone.value__)) -eq $false){
+            Write-ToLogVerbose ("No ActiveX Policy found`n")
+            }
+            else {
+            $ActiveXPolicyCheck = $(Get-Item -Path ("HKCU:\Software\Policies\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\" + $IEZone.value__)).GetValue('2000')
+            if ( $ActiveXPolicyCheck -eq 0 ) {$ActiveXPolicyEnabled = "Enabled"}
+            elseif ( $ActiveXPolicyCheck -eq 1 ) {$ActiveXPolicyEnabled = "Prompt"}
+            elseif ( $ActiveXPolicyCheck -eq 3 ) {$ActiveXPolicyEnabled = "Disabled"}
+            else {$ActiveXPolicyCheck = "Unknown"}
+            Write-ToLogVerbose ("Checking if ActiveX Policy is enabled. Value identified: " + $ActiveXPolicyEnabled +"`n")
+            }
       
 #    3.	Version of SSL/TLS not supported by server
         if ( ($testconnection -eq $true) -and ($WebAddress.Scheme -eq "https") ) {
             $ServerProtocolsAccepted = $null; [int] $iBestSsl = 0;
-            if ([WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, 32, $IgnoreBadCert ) -eq 0 ) 
+            if ([WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 32, $IgnoreBadCert ) -eq 0 ) 
                 { Write-ToLogVerbose "The server supports SSL3"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " SSL3" ; $iBestSsl = 32 } 
             else { Write-ToLog "The server does not support SSL3" }
 
-            if ([WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, 128, $IgnoreBadCert ) -eq 0 ) 
+            if ([WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 128, $IgnoreBadCert ) -eq 0 ) 
                 { Write-ToLogVerbose "The server supports TLS 1.0"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS1" ; $iBestSsl = 128 } 
             else { Write-ToLog "The server does not support TLS 1.0" }
 
-            if ([WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, 512, $IgnoreBadCert ) -eq 0 ) 
+            if ([WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 512, $IgnoreBadCert ) -eq 0 ) 
                 { Write-ToLogVerbose "The server supports TLS 1.1"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS11" ; $iBestSsl = 512 } 
             else { Write-ToLog "The server does not support TLS 1.1" }
 
-            if ([WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, 2048, $IgnoreBadCert ) -eq 0 ) 
+            if ([WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 2048, $IgnoreBadCert ) -eq 0 ) 
                 { Write-ToLogVerbose "The server supports TLS 1.2"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS12" ; $iBestSsl = 2048 } 
             else { Write-ToLog "The server does not support TLS 1.2" }
 
@@ -366,7 +388,7 @@ function Test-MsDavConnection {
 
 #    4.	Certificate is expired or doesn't match
             if ($iBestSsl -gt 0 ) {
-                $certcheck = [WebClientTest.WinAPI]::TestSsl($testurl.DnsSafeHost, $testurl.Port, $iBestSsl, $false )
+                $certcheck = [WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, $iBestSsl, $false )
                 if ($certcheck -eq 0 ) 
                     { Write-ToLogVerbose "No certificate problem observed"} 
                 else { 
@@ -393,14 +415,15 @@ function Test-MsDavConnection {
 #    1.	Failing Authentication
         if ( $testconnection ) {
             Write-ToLog ("`n`n" + $dblbar + "`r`nDetermining authentication mode")
+            $global:newlocation = $WebAddress
             $verb = "HEAD"
             $followredirect = $false
             $addcookies = $false
             $credtype = "Anonymous" # 3 choices = "Anonymous", "DefaultCreds", "AlternateCreds"
             $maxtry = 5
             do {
-                $responseresult = SendWebRequest -url $WebAddress -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
-                Write-ToLog ("Result: " + $responseresult)
+                $responseresult = SendWebRequest -url $global:newlocation -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
+                Write-ToLogVerbose ("Result: $responseresult `r`n")
                 switch ($responseresult ) {
                     "SwitchToGET" { $verb = "GET" }
                     "AddCookies"  { $addcookies = $true }
@@ -478,9 +501,11 @@ function Test-MsDavConnection {
 #        a.	No DAV at root
 #        b.	No permissions at root
 #        c.	Root site missing 
-            Write-ToLog ("`n`r`n" + $dblbar + "`r`nChecking root site access")
-            $verb = "PROPFIND"
-            $responseresult = SendWebRequest -url $rootweb -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
+            if ($rootweb -ne $WebAddress ){
+                Write-ToLog ("`n`r`n" + $dblbar + "`r`nChecking root site access")
+                $verb = "PROPFIND"
+                $responseresult = SendWebRequest -url $rootweb -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
+            }
         }
 
 
@@ -504,8 +529,8 @@ function Test-MsDavConnection {
             Write-ToLog ("The current client setting for SendReceiveTimeoutInSec is: " + $WCtimeout )
 
 #    2.	Slow to connect
-#        a.	Auto-detect proxy unnecessarily selected
-            Write-ToLogVerbose "`nTODO: Auto-detect proxy`n"
+#        a.	The WebClient service was not already started
+          if ($WCStartType -ne "Automatic") { Write-ToLog "For best performance, set the StartUp Type to 'Automatic'" }
 #        b.	SMB attempts receive no response before falling through to WebClient
             Write-ToLog "`nTesting SMB connectivity - using UNC will try SMB before using WebDAV and can cause a delay if blocked improperly"
 
@@ -530,8 +555,8 @@ function Test-MsDavConnection {
 			if ($smb2responsetime -gt 3) {Write-ToLogWarning ($smb2) }
             else { Write-ToLog ($smb2) }
 
-#        c.	The WebClient service was not already started
-          if ($WCStartType -ne "Automatic") { Write-ToLog "For best performance, set the StartUp Type to 'Automatic'" }
+#        c.	Auto-detect proxy unnecessarily selected
+            Write-ToLogVerbose "`nTODO: Auto-detect proxy`n"
 
 #    3.	Slow to browse
             Write-ToLogVerbose "TODO: Check browsing performance scenarios`n"
@@ -551,8 +576,8 @@ function Test-MsDavConnection {
 
 function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $includecookies = $false, $follow302=$true, [string] $usecreds)
 {
-    Write-ToLog ($dblbar + "`r`n" + $verb + " test")
-    Write-ToLog ("`t" + $url + " UserAgent: " + $useragent + " Cookies:" + $includecookies + " Follow302:" + $follow302 + " CredType:" + $usecreds)
+    Write-ToLog ($dblbar + "`r`n" + $verb + " test to $url")
+    Write-ToLogVerbose ("`tUserAgent: " + $useragent + " Cookies:" + $includecookies + " Follow302:" + $follow302 + " CredType:" + $usecreds)
     #Write-ToLog ($dblbar)
     [net.httpWebRequest] $req = [net.webRequest]::Create($url)
 	$req.AllowAutoRedirect = $follow302
@@ -634,12 +659,12 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
                     }
                 "Allow" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "Date" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "Location" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Location" { $newlocation = $res.Headers.GetValues($h) ;Write-ToLogVerbose ("`t" + $h + ":`t" + $newlocation) ; Break }
                 "Content-Type" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "Content-Encoding" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "request-id" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 # X-MSDAVEXT_Error: 917656; Access+denied.+Before+opening+files+in+this+location%2c+you+must+first+browse+to+the+web+site+and+select+the+option+to+login+automatically.
-                "X-MSDAVEXT_Error" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "X-MSDAVEXT_Error" { $global:auth_fba = $true ; Write-ToLogWarning ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "X-FORMS_BASED_AUTH_REQUIRED" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "FORMS_BASED_AUTH_RETURN_URL" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "*" { Write-ToLogVerbose ("`t? " + $h + ": " + $res.Headers.GetValues($h))}
@@ -667,7 +692,7 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
         else {$statuscheck = "Complete-401" }
     }
     elseif ($statcode -eq 302 ) { 
-        if ($follow302 -eq $false ) {$statuscheck = "AddFollow302" }
+        if ($follow302 -eq $false ) {$statuscheck = "AddFollow302" ; Write-ToLog ("Redirected to $newlocation")}
         else {$statuscheck = "Complete-302" }
     }
     elseif ($statcode -eq 200 ) {$statuscheck = "Complete-200" }
