@@ -1,5 +1,4 @@
 ﻿$deftesturl = "http://www.myserver.com"
-$deftesturl = "https://www.bing.com"
 
 [void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
 [uri] $testurl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the target web folder", "Web Address", $deftesturl)
@@ -25,13 +24,13 @@ $WebClientTestSrc = @'
         // Determine the size of the cookie      
         UInt32 datasize = 256*1024;
         System.Text.StringBuilder cookieData = new System.Text.StringBuilder(Convert.ToInt32(datasize));
-        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00001000, IntPtr.Zero))
+        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00003000, IntPtr.Zero))
         {
         if (datasize < 0)
             return null;
         // Allocate stringbuilder large enough to hold the cookie    
         cookieData = new System.Text.StringBuilder(Convert.ToInt32(datasize));
-        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00001000, IntPtr.Zero))
+        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00003000, IntPtr.Zero))
             return null;
         }
         return cookieData.ToString();
@@ -130,10 +129,12 @@ function Test-MsDavConnection {
             )][uri]$WebAddress 
         )
     begin {
+        $ProgressPreference = 'SilentlyContinue'
         if ($PSVersionTable.PSVersion.Major -eq 2){ $osverstring = [environment]::OSVersion.Version.ToString() } 
         else { $osverstring = $(Get-CimInstance Win32_OperatingSystem).Version }
         $osver = [int] ([convert]::ToInt32($osverstring.Split('.')[0], 10) + [convert]::ToInt32($osverstring.Split('.')[1], 10))
         $osname = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").ProductName
+        if ($osver -eq 10) { $osname = $osname + " " + (Get-ComputerInfo).WindowsVersion }
         $defaultNPO = ('RDPNP,LanmanWorkstation,webclient').ToLower()
         $WCfilesize = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").FileSizeLimitInBytes 
         $WCtimeout = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").SendReceiveTimeoutInSec  
@@ -152,6 +153,7 @@ function Test-MsDavConnection {
         $Shell32dll = $fso.GetFileVersion('C:\Windows\System32\shell32.dll')
         $WinHttpdll = $fso.GetFileVersion('C:\Windows\System32\winhttp.dll')
         $WebIOdll =  $fso.GetFileVersion('C:\Windows\System32\webio.dll')
+        $ProgressPreference = 'Continue'
     }
 
     process {
@@ -335,6 +337,7 @@ function Test-MsDavConnection {
         Write-ToLog $davport
 
 # Internet Settings Security Zone information
+# https://support.microsoft.com/en-us/help/182569/internet-explorer-security-zones-registry-entries-for-advanced-users
         $IEZone = [System.Security.Policy.Zone]::CreateFromUrl($WebAddress).SecurityZone
         $IEPMode = [WebClientTest.WinAPI]::GetProtectedMode($WebAddress)
         if ( $IEPMode -eq 0 ) {$ProtectMode = "Enabled"}
