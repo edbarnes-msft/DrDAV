@@ -1,9 +1,13 @@
-﻿$deftesturl = "http://www.myserver.com"
+﻿$deftesturl =  'https://www.myserver.com'
 
 [void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
+
+$WCInstalled = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient"
 [uri] $testurl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the target web folder", "Web Address", $deftesturl)
 
-$logfile = $env:TEMP+"\_DavTest_"+$env:COMPUTERNAME+"_"+(Get-Date -Format yyddMMhhmm)+".log"
+$logpath = $env:TEMP+"\_DavTest"
+New-Item -ItemType Directory -Force -Path $logpath
+$logfile = $logpath +"\"+$env:COMPUTERNAME+"_"+(Get-Date -Format yyddMMhhmm)+".log"
 #$logfile = [Microsoft.VisualBasic.Interaction]::InputBox("Specify the logging file", "Log File", $logfile)
 
 $outputverbose = $false
@@ -137,13 +141,14 @@ function Test-MsDavConnection {
         if ($osver -eq 10) { $osname = $osname + " " + (Get-ComputerInfo).WindowsVersion }
         $defaultNPO = ('RDPNP,LanmanWorkstation,webclient').ToLower()
         $WCfilesize = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").FileSizeLimitInBytes 
+        $WCattribsize = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").FileAttributesLimitInBytes 
         $WCtimeout = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").SendReceiveTimeoutInSec  
         $npo = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\Order").ProviderOrder
         $hnpo = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\NetworkProvider\HwOrder").ProviderOrder
         $WCBasicauth = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").BasicAuthLevel
         $WCAFSL = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").AuthForwardServerList
         if ($WCAFSL.length -eq 0 ) {$WCAFSLOut = "Not configured or empty" } else { $WCAFSLOut = $WCAFSL } 
-        $sslprotocols=[string]::Join(" ",([enum]::GetNames([System.Security.Authentication.SslProtocols])|?{$_ -notmatch 'none|default|ssl2'} ) ) #ssl3|tls|tls11|tls12
+        $sslprotocols=[string]::Join(" ",([enum]::GetNames([System.Security.Authentication.SslProtocols])|?{$_ -notmatch 'none|default|ssl2'} ) ) #ssl3|tls|tls11|tls12(|tls13)
         $IgnoreBadCert = $true
         $WCuseragent = "Microsoft-WebDAV-MiniRedir/" + $osverstring
         $fso = New-Object -comobject Scripting.FileSystemObject
@@ -175,6 +180,7 @@ function Test-MsDavConnection {
             AuthForwardServerList = $WCAFSLOut
             BasicAuthLevel=$WCBasicauth
             FileSizeLimitInBytes = $WCfilesize.ToString("N0")
+            FileAttributesLimitInBytes = $WCattribsize.ToString("N0")
             SendReceiveTimeoutInSec = $WCtimeout.ToString("N0")
             }    
 
@@ -260,14 +266,18 @@ function Test-MsDavConnection {
                     }
                 }
     
-            $dsp = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols
-            if ($dsp -eq $null ) {Write-ToLogWarning "WinHttp registry entry is absent" } else { Write-ToLog ("WinHttp registry entry is: " + $dsp.ToString('x2').ToUpper()) }
-            if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
-                $dspwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols
-                if ($dspwow -eq $null ) {Write-ToLogWarning "WinHttp WOW6432 registry entry is absent" } else { Write-ToLog ("WinHttp WOW6432 registry entry is: " + $dspwow.ToString('x2').ToUpper()) }
-                }                     
             }
 
+        if (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" | Select-Object -ExpandProperty DefaultSecureProtocols -ErrorAction SilentlyContinue | Out-Null){
+            $dsp = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols }
+        if ($dsp -eq $null ) {Write-ToLogWarning "WinHttp registry entry is absent" } else { Write-ToLog ("WinHttp registry entry is: " + $dsp.ToString('x2').ToUpper()) }
+        if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
+            if (Test-Path "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp"){
+                if (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" | Select-Object -ExpandProperty DefaultSecureProtocols -ErrorAction SilentlyContinue | Out-Null){
+                    $dspwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols}}
+            if ($dspwow -eq $null ) {Write-ToLogWarning "WinHttp WOW6432 registry entry is absent" } else { Write-ToLog ("WinHttp WOW6432 registry entry is: " + $dspwow.ToString('x2').ToUpper()) }
+            }  
+                                   
         $strongcrypt = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319").SchUseStrongCrypto
         if ($strongcrypt -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto registry entry for v4 is: " + $strongcrypt) }
         if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
@@ -288,6 +298,8 @@ function Test-MsDavConnection {
             $sysdeftlsverwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v2.0.50727").SystemDefaultTlsVersions
             if ($sysdeftlsverwow -eq $null ) {Write-ToLogVerbose "SystemDefaultTlsVersions WOW6432 registry entry is absent" } else { Write-ToLogVerbose ("SystemDefaultTlsVersions WOW6432 registry entry is: " + $sysdeftlsverwow) }
         }          
+
+        Write-ToLog ("Client Secure Protocols enabled for .Net: " + $sslprotocols.ToUpper() ) 
       
 #    2.	Bad Network Provider order
 #        a.	WebClient missing from provider order
@@ -320,7 +332,7 @@ function Test-MsDavConnection {
         if ($osver -eq 7 ) 
         {
             # New-Object System.Net.Sockets.TcpClient($WebAddress.DnsSafeHost,$WebAddress.Port)
-            $ns = New-Object system.net.sockets.tcpclient
+            $ns = New-Object System.Net.Sockets.TcpClient
             try { $ns.Connect($WebAddress.DnsSafeHost, $WebAddress.Port ) } catch {}
             $rtt = (New-TimeSpan $starttime $(Get-Date) ).Milliseconds
             if( $ns.Connected) {$testconnection = $true; $ns.Close()}
@@ -365,48 +377,48 @@ function Test-MsDavConnection {
             Write-ToLogVerbose ("Checking if ActiveX Policy is enabled. Value identified: " + $ActiveXPolicyEnabled +"`n")
             }
       
-#    3.	Version of SSL/TLS not supported by server
+#    3.	Version of SSL/TLS not supported by destination server
         if ( ($testconnection -eq $true) -and ($WebAddress.Scheme -eq "https") ) {
             $ServerProtocolsAccepted = $null; [int] $iBestSsl = 0;
             if ([WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 32, $IgnoreBadCert ) -eq 0 ) 
-                { Write-ToLogVerbose "The server supports SSL3"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " SSL3" ; $iBestSsl = 32 } 
+                { Write-ToLogVerbose "The server supports SSL3"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " SSL3" ; $iBestSsl = 32 ; $sBestSsl = "SSL3" } 
             else { Write-ToLog "The server does not support SSL3" }
 
             if ([WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 128, $IgnoreBadCert ) -eq 0 ) 
-                { Write-ToLogVerbose "The server supports TLS 1.0"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS1" ; $iBestSsl = 128 } 
+                { Write-ToLogVerbose "The server supports TLS 1.0"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS1" ; $iBestSsl = 128 ; $sBestSsl = "TLS1" } 
             else { Write-ToLog "The server does not support TLS 1.0" }
 
             if ([WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 512, $IgnoreBadCert ) -eq 0 ) 
-                { Write-ToLogVerbose "The server supports TLS 1.1"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS11" ; $iBestSsl = 512 } 
+                { Write-ToLogVerbose "The server supports TLS 1.1"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS11" ; $iBestSsl = 512 ; $sBestSsl = "TLS11" } 
             else { Write-ToLog "The server does not support TLS 1.1" }
 
             if ([WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 2048, $IgnoreBadCert ) -eq 0 ) 
-                { Write-ToLogVerbose "The server supports TLS 1.2"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS12" ; $iBestSsl = 2048 } 
+                { Write-ToLogVerbose "The server supports TLS 1.2"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS12" ; $iBestSsl = 2048 ; $sBestSsl = "TLS12" } 
             else { Write-ToLog "The server does not support TLS 1.2" }
 
             if ($ServerProtocolsAccepted -eq $null) {Write-ToLog "No attempted protocols succeeded"}
             else {$ServerProtocolsAccepted = $ServerProtocolsAccepted.Substring(1); Write-ToLog ( "Server supports: " + $ServerProtocolsAccepted.ToUpper() ) }
 
-            Write-ToLog ("Secure Protocols enabled for .Net: " + $sslprotocols.ToUpper() ) 
 
 #    4.	Certificate is expired or doesn't match
-            if ($iBestSsl -gt 0 ) {
-                $certcheck = [WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, $iBestSsl, $false )
-                if ($certcheck -eq 0 ) 
-                    { Write-ToLogVerbose "No certificate problem observed"} 
-                else { 
-                    switch ($certcheck ) {
-                        "12037"  { Write-ToLog "Certificate Error Invalid Date" }
-                        "12038"  { Write-ToLog "Certificate Error Invalid Common Name" }
-                        "12044"  { Write-ToLog "Client Authentication Certificate Needed" }
-                        "12045"  { Write-ToLog "Certificate CA is Invalid" }
-                        "12169"  { Write-ToLog "Invalid Certificate" }      
-                        "12179"  { Write-ToLog "Invalid Usage for Certificate" }                    
-                        }
+            $certcheck = [WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, $iBestSsl, $false )
+            if ($certcheck -eq 0 ) 
+                { Write-ToLogVerbose "No certificate problem observed"} 
+            else { 
+                switch ($certcheck ) {
+                    "12037"  { Write-ToLog "Certificate Error Invalid Date" }
+                    "12038"  { Write-ToLog "Certificate Error Invalid Common Name" }
+                    "12044"  { Write-ToLog "Client Authentication Certificate Needed" }
+                    "12045"  { Write-ToLog "Certificate CA is Invalid" }
+                    "12169"  { Write-ToLog "Invalid Certificate" }      
+                    "12179"  { Write-ToLog "Invalid Usage for Certificate" }  
+                    default  { Write-ToLog "Certificate failure: $certcheck`r`n"}                 
                     }
                 }
-                # Optional ToDo - Check cert chain
+            Test-SslCert $WebAddress.DnsSafeHost $WebAddress.Port $sBestSsl
+            # Optional ToDo - Check cert chain
             }
+
 
 #    5.	Bad proxy settings
             Write-ToLogVerbose "TODO: Check proxy config"
@@ -530,6 +542,8 @@ function Test-MsDavConnection {
             else { Write-ToLog "`tUnable to determine RTT. Consider using PsPing from SysInternals to find the RTT" }
 
             Write-ToLog ("The current client setting for SendReceiveTimeoutInSec is: " + $WCtimeout )
+#        d.	Number of file causes total attribute to exceeds attribute size limit
+            Write-ToLog ("Current setting of FileAttributesLimitInBytes is: " + $WCattribsize.ToString("N0") + " bytes")
 
 #    2.	Slow to connect
 #        a.	The WebClient service was not already started
@@ -555,7 +569,7 @@ function Test-MsDavConnection {
             $ns.Close()
 
             $smb2 = "SMB2 test connection took " + $smb2responsetime + " seconds"
-			if ($smb2responsetime -gt 3) {Write-ToLogWarning ($smb2) }
+			if ($smb2responsetime -gt 15) {Write-ToLogWarning ($smb2) }
             else { Write-ToLog ($smb2) }
 
 #        c.	Auto-detect proxy unnecessarily selected
@@ -586,7 +600,8 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
 	$req.AllowAutoRedirect = $follow302
 	$req.Method = $verb
     if ( $useragent -ne $null ) {$req.UserAgent = $useragent}
-    if ( $includecookies -eq $true ) {$cookiesread = $([WebClientTest.WinAPI]::GetCookieString($url)).Split(";")}
+    if ( $req.Method -eq "PROPFIND" ) { $req.Headers["Depth"] = 0 }
+    if ( $includecookies -eq $true ) {$gcresult = [WebClientTest.WinAPI]::GetCookieString($url); if ($gcresult.Length > 0){$cookiesread = $($gcresult).Split(";")}}
 
     $jar = New-Object System.Net.CookieContainer
     if ($cookiesread.count -gt 0) {
@@ -607,7 +622,8 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
         "Anonymous" {$req.Credentials = $null }
         "DefaultCreds" {$req.UseDefaultCredentials = $true }
         "AlternateCreds" {
-            if ($global:altcreds -eq $null){$global:altcreds = Get-Credential}
+            if ($global:altcreds -eq $null){$global:altcreds = Get-Credential }
+
             $req.Credentials = $global:altcreds
             }
     }
@@ -712,7 +728,7 @@ function ReturnBody($response)
         $responsestream = $response.getResponseStream() 
         $streamreader = New-Object IO.StreamReader($responsestream) 
         $body = $streamreader.ReadToEnd() 
-        Add-Content $logfile -Value $body
+        Add-Content $($logpath + "\Response_" + (Get-Date -Format hhmmss) + ".txt")  -Value $body
     }
     # Test if body is valid XML
 
@@ -738,6 +754,49 @@ function Check-Version($tval, $bval)
         }
     }
     return $false
+}
+
+function Test-SslCert {
+    param(
+        [Parameter(
+            Mandatory=$true,
+            ValueFromPipelineByPropertyName=$true,
+            ValueFromPipeline=$true
+        )]$destHostName,
+        [Parameter(
+            ValueFromPipelineByPropertyName=$true
+        )][int]$destPort,
+        [ValidateSet("SSL3", "TLS", "TLS11", "TLS12", IgnoreCase = $true)]
+        [Parameter(
+            ValueFromPipelineByPropertyName=$true
+        )]$destProtocol 
+    )
+
+    $Callback = { param($sender, $cert, $chain, $errors) return $true }
+    $Socket = New-Object System.Net.Sockets.Socket('Internetwork','Stream', 'Tcp')
+    $Socket.Connect($destHostName, $destPort)
+    try {
+        $NetStream = New-Object System.Net.Sockets.NetworkStream($Socket, $true)
+        $SslStream = New-Object System.Net.Security.SslStream($NetStream, $true, $Callback)
+        $SslStream.AuthenticateAsClient($destHostName,  $null, $destProtocol, $false )
+        $RemoteCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]$SslStream.RemoteCertificate
+        Write-ToLog  ('Cert info - Host name(s): ' + $RemoteCertificate.DnsNameList)
+        Write-ToLog  ('Cert info - Not Before: ' + $RemoteCertificate.NotBefore )
+        Write-ToLog  ('Cert info - Not After: ' + $RemoteCertificate.NotAfter )
+        Write-ToLog  ('Cert info - Subject: ' + $RemoteCertificate.GetNameInfo(3,$false) )
+        #Write-ToLog  ('Cert info - Distinguished Name: ' + $RemoteCertificate.SubjectName.Name )
+        Write-ToLog  ('Cert info - Issuer: ' + $RemoteCertificate.GetNameInfo(3,$true) )
+        Write-ToLog  ('Cert info - Issuer Distinguished Name: ' + $RemoteCertificate.IssuerName.Name )
+        Write-ToLog  ('Cert info - Usage: ' + $RemoteCertificate.EnhancedKeyUsageList )
+    } 
+    catch {
+        $_.Exception
+    }
+    finally {
+        $SslStream.Close()
+        $NetStream.Close()
+    }
+    
 }
 
 function Write-ToLog()
