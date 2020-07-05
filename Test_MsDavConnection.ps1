@@ -6,7 +6,7 @@ $WCInstalled = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient"
 [uri] $testurl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the target web folder", "Web Address", $deftesturl)
 
 $logpath = $env:TEMP+"\_DavTest"
-New-Item -ItemType Directory -Force -Path $logpath
+New-Item -ItemType Directory -Force -Path $logpath > $null
 $logfile = $logpath +"\"+$env:COMPUTERNAME+"_"+(Get-Date -Format yyddMMhhmm)+".log"
 #$logfile = [Microsoft.VisualBasic.Interaction]::InputBox("Specify the logging file", "Log File", $logfile)
 
@@ -21,21 +21,27 @@ $WebClientTestSrc = @'
     }
     [DllImport("C:\\Windows\\System32\\wininet.dll", CharSet=CharSet.Auto, SetLastError=true)]
     static extern bool InternetSetCookie(string lpszUrl, string lpszCookieName, string lpszCookieData);
+    public static bool SetCookieString(string url, string name, string value)
+    {
+        if (!InternetSetCookie(url, name, value)) { Console.Write( "Failed to set cookie. Error code: {0}. ", Marshal.GetLastWin32Error()); return false; }
+        return true;
+    }
+
     [DllImport("C:\\Windows\\System32\\wininet.dll", CharSet=CharSet.Auto, SetLastError=true)]
     static extern bool InternetGetCookieEx(string pchURL, string pchCookieName, System.Text.StringBuilder pchCookieData, ref System.UInt32 pcchCookieData, int dwFlags, IntPtr lpReserved);
+    const int ERROR_NO_MORE_ITEMS = 259;
+    const int flags = 0x00003000; // INTERNET_COOKIE_NON_SCRIPT  0x00001000, INTERNET_COOKIE_HTTPONLY 0x00002000
     public static string GetCookieString(string url)
     {
         // Determine the size of the cookie      
-        UInt32 datasize = 256*1024;
+        UInt32 datasize = 256*1024; int iResult = 0; 
         System.Text.StringBuilder cookieData = new System.Text.StringBuilder(Convert.ToInt32(datasize));
-        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00003000, IntPtr.Zero))
-        {
-        if (datasize < 0)
-            return null;
-        // Allocate stringbuilder large enough to hold the cookie    
-        cookieData = new System.Text.StringBuilder(Convert.ToInt32(datasize));
-        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, 0x00003000, IntPtr.Zero))
-            return null;
+        if (!InternetGetCookieEx(url, null, cookieData, ref datasize, flags, IntPtr.Zero)) {
+            iResult = Marshal.GetLastWin32Error(); // Console.Write( "The request returned error {0}. ", iResult);
+            if ((ERROR_NO_MORE_ITEMS == iResult) | (datasize < 0)) return null; // Console.Write( "Datasize {0}. ", datasize);
+            // Allocate stringbuilder large enough to hold the cookie    
+            cookieData = new System.Text.StringBuilder(Convert.ToInt32(datasize));
+            if (!InternetGetCookieEx(url, null, cookieData, ref datasize, flags, IntPtr.Zero)) { Console.Write( "GetCookie request returned error {0}. ", iResult);return null;}
         }
         return cookieData.ToString();
     }
@@ -123,6 +129,7 @@ $wcshellminver7 = "6.1.7601.22498"; $wcminver7 = "6.1.7601.23542"; $winhttpminve
 $wcminver8GDR = "6.2.9200.17428"; $wcminver8LDR = "6.2.9200.21538"; $winhttpminver8 = "6.2.9200.21797"
 $wcminver81 = "6.3.9600.17923"; $wcrecver10 = "10.0.16299.334"
 $newlocation = ""
+$persistentcookies = ""
 
 function Test-MsDavConnection {
     [CmdletBinding()] 
@@ -182,6 +189,7 @@ function Test-MsDavConnection {
             FileSizeLimitInBytes = $WCfilesize.ToString("N0")
             FileAttributesLimitInBytes = $WCattribsize.ToString("N0")
             SendReceiveTimeoutInSec = $WCtimeout.ToString("N0")
+            Currentuser=$([environment]::UserDomainName + "\" + [environment]::UserName)
             }    
 
             
@@ -494,8 +502,15 @@ function Test-MsDavConnection {
 #            ii.	Cookie not stored in shareable location
                 if ( $IEPMode -eq 0 ) {Write-ToLogWarning ("Protect Mode is enabled for the $IEZone Security Zone so Persistent cookies cannot be shared.")}
                 elseif ( $IEPMode -eq 1 )  {Write-ToLog ("Protect Mode is not enabled for the $IEZone Security Zone so Persistent cookies can be shared.")}
-                $persistentcookies = [WebClientTest.WinAPI]::GetCookieString($WebAddress) 
-                Write-ToLogVerbose ("Persistent cookies for " + $WebAddress + " :`r`n" + $persistentcookies )
+                $global:persistentcookies = [WebClientTest.WinAPI]::GetCookieString($WebAddress) 
+                if ($global:persistentcookies.length ) {
+                    Write-ToLog ("`r`nPersistent Cookies:`n===================")
+                    $global:persistentcookies.split("; ") | ForEach-Object{ 
+                         $cookie = $_
+                         #if ($cookie.Length -gt 7){ if ($cookie.Substring(0,7) -eq "FedAuth") {$fedauth = $cookie.Substring(8)}  }
+                         Write-ToLog "`t$cookie"
+                    }
+                } else { Write-ToLog "`tNo persistent cookies found" }
                 Write-ToLog ( $dblbar + "`r`n")
             }
 
@@ -589,33 +604,21 @@ function Test-MsDavConnection {
 }
 
 
-
-
-function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $includecookies = $false, $follow302=$true, [string] $usecreds)
+function SendWebRequest([uri] $url, [string] $verb, [string] $useragent, $includecookies = $false, $follow302=$true, [string] $usecreds)
 {
-    Write-ToLog ($dblbar + "`r`n" + $verb + " test to $url")
+    Write-ToLog ($dblbar + "`r`n`r`n" + $verb + " test to $url")
     Write-ToLogVerbose ("`tUserAgent: " + $useragent + " Cookies:" + $includecookies + " Follow302:" + $follow302 + " CredType:" + $usecreds)
-    #Write-ToLog ($dblbar)
-    [net.httpWebRequest] $req = [net.webRequest]::Create($url)
-	$req.AllowAutoRedirect = $follow302
-	$req.Method = $verb
-    if ( $useragent -ne $null ) {$req.UserAgent = $useragent}
-    if ( $req.Method -eq "PROPFIND" ) { $req.Headers["Depth"] = 0 }
-    if ( $includecookies -eq $true ) {$gcresult = [WebClientTest.WinAPI]::GetCookieString($url); if ($gcresult.Length > 0){$cookiesread = $($gcresult).Split(";")}}
 
-    $jar = New-Object System.Net.CookieContainer
-    if ($cookiesread.count -gt 0) {
-        $cc = New-Object System.Net.CookieCollection
-        foreach ($cookie in $cookiesread) {
-            $c = New-Object System.Net.Cookie
-            $c.Name = $cookie.Split("=")[0].Trim()
-            $c.Value = $cookie.Substring($cookie.IndexOf("=") + 1)
-            $cc.Add($c)
+    [net.httpWebRequest] $req = [net.webRequest]::Create($url)
+
+    $req.CookieContainer = New-Object System.Net.CookieContainer
+    if ( $includecookies -eq $true ) {
+        $gcresult = [WebClientTest.WinAPI]::GetCookieString($url); 
+        if ($gcresult.Length ){ 
+            $cookiesread = $gcresult.Split(";")
+            $cookiesread | ForEach-Object { $req.CookieContainer.SetCookies($url,$_.Trim()) }
         }
-        foreach ($c in $cc) { Write-ToLogVerbose ($c.tostring()) }
-        $jar.Add($url, $cc)
     }
-    $req.CookieContainer = $jar
 
     switch ($usecreds) 
     { 
@@ -627,6 +630,11 @@ function SendWebRequest([string] $url, [string] $verb, [string] $useragent, $inc
             $req.Credentials = $global:altcreds
             }
     }
+
+	$req.AllowAutoRedirect = $follow302
+	$req.Method = $verb
+    if ( $useragent -ne $null ) {$req.UserAgent = $useragent}
+    if ( $req.Method -eq "PROPFIND" ) { $req.Headers["Depth"] = 0 }
 
 	#Get Response
 	try {
