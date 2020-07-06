@@ -1,8 +1,6 @@
 ﻿$deftesturl =  'https://www.myserver.com'
 
 [void][System.Reflection.Assembly]::LoadWithPartialName('Microsoft.VisualBasic')
-
-$WCInstalled = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient"
 [uri] $testurl = [Microsoft.VisualBasic.Interaction]::InputBox("Enter the target web folder", "Web Address", $deftesturl)
 
 $logpath = $env:TEMP+"\_DavTest"
@@ -130,6 +128,7 @@ $wcminver8GDR = "6.2.9200.17428"; $wcminver8LDR = "6.2.9200.21538"; $winhttpminv
 $wcminver81 = "6.3.9600.17923"; $wcrecver10 = "10.0.16299.334"
 $newlocation = ""
 $persistentcookies = ""
+$propfindnodecount = 0
 
 function Test-MsDavConnection {
     [CmdletBinding()] 
@@ -146,7 +145,7 @@ function Test-MsDavConnection {
         $osver = [int] ([convert]::ToInt32($osverstring.Split('.')[0], 10) + [convert]::ToInt32($osverstring.Split('.')[1], 10))
         $osname = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").ProductName
         if ($osver -eq 10) { $osname = $osname + " " + (Get-ComputerInfo).WindowsVersion }
-        $defaultNPO = ('RDPNP,LanmanWorkstation,webclient').ToLower()
+        $defaultNPO = ('RDPNP,LanmanWorkstation,webclient')
         $WCfilesize = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").FileSizeLimitInBytes 
         $WCattribsize = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").FileAttributesLimitInBytes 
         $WCtimeout = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\WebClient\Parameters").SendReceiveTimeoutInSec  
@@ -277,14 +276,26 @@ function Test-MsDavConnection {
             }
 
         if (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" | Select-Object -ExpandProperty DefaultSecureProtocols -ErrorAction SilentlyContinue | Out-Null){
-            $dsp = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols }
-        if ($dsp -eq $null ) {Write-ToLogWarning "WinHttp registry entry is absent" } else { Write-ToLog ("WinHttp registry entry is: " + $dsp.ToString('x2').ToUpper()) }
+            $dsp = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols 
+            if ($osver -eq 10) {
+                if ($dsp -ne $null ) {Write-ToLogWarning "WinHttp registry entry is: " + $dsp.ToString('x2').ToUpper() }
+            } else {
+                if ($dsp -eq $null ) {Write-ToLogWarning "WinHttp registry entry is absent" } else { Write-ToLog ("WinHttp registry entry is: " + $dsp.ToString('x2').ToUpper() ) }
+            }
+        }
         if ([environment]::GetEnvironmentVariable("ProgramFiles(x86)").Length -gt 0){
             if (Test-Path "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp"){
                 if (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp" | Select-Object -ExpandProperty DefaultSecureProtocols -ErrorAction SilentlyContinue | Out-Null){
-                    $dspwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols}}
-            if ($dspwow -eq $null ) {Write-ToLogWarning "WinHttp WOW6432 registry entry is absent" } else { Write-ToLog ("WinHttp WOW6432 registry entry is: " + $dspwow.ToString('x2').ToUpper()) }
-            }  
+                    $dspwow = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp").DefaultSecureProtocols
+                }
+            }
+            if ($osver -eq 10) {
+                if ($dspwow -ne $null ) {Write-ToLogWarning "WinHttp WOW6432 registry entry is: " + $dspwow.ToString('x2').ToUpper() }
+            } else {
+                if ($dspwow -eq $null ) {Write-ToLogWarning "WinHttp WOW6432 registry entry is absent" } else { Write-ToLog ("WinHttp WOW6432 registry entry is: " + $dspwow.ToString('x2').ToUpper() ) }
+            }
+        }  
+        
                                    
         $strongcrypt = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319").SchUseStrongCrypto
         if ($strongcrypt -eq $null ) {Write-ToLogVerbose "SchUseStrongCrypto registry entry is absent" } else { Write-ToLogVerbose ("SchUseStrongCrypto registry entry for v4 is: " + $strongcrypt) }
@@ -310,23 +321,23 @@ function Test-MsDavConnection {
         Write-ToLog ("Client Secure Protocols enabled for .Net: " + $sslprotocols.ToUpper() ) 
       
 #    2.	Bad Network Provider order
-#        a.	WebClient missing from provider order
-            $npomsg = "`nNetwork Provider Order check: "
-            $npocheck = 'Good'
-          if ($npo.ToLower() -ne $hnpo.ToLower()) { 
-                $npocheck = 'HwOrder doesn''t match Order' 
-                Write-ToLogWarning ($npocheck +"`n`tOrder: " + $npo + "`n`tHwOrder: " + $hnpo)
-                }
-          if ( !("," + $hnpo +",").ToLower().Contains(",webclient,") -or !("," + $npo +",").ToLower().Contains(",webclient,") ) {
-                $npocheck = 'WebClient is missing from provider list' 
-                Write-ToLogWarning ($npomsg + $npocheck + "`n`tOrder: " + $npo )
-                }
-#        b.	Third-party providers interfering
-          if ( ($npocheck -eq "Good") -and ($npo.ToLower() -ne $defaultnpo.ToLower()) ) { 
-                $npocheck = 'Order doesn''t match Default' 
-                Write-ToLog ($npomsg + $npocheck + "`n`tOrder: " + $npo )
-                }
-          if ( $npocheck -eq "Good") {Write-ToLog ($npomsg + $npocheck)}
+#       a.	WebClient missing from provider order
+        $npomsg = "`r`nNetwork Provider Order check: "
+        $npocheck = 'Good'
+        if ($npo.ToLower() -ne $hnpo.ToLower()) { 
+            $npocheck = 'HwOrder doesn''t match Order' 
+            Write-ToLogWarning ($npocheck +"`r`n`tOrder: " + $npo + "`r`n`tHwOrder: " + $hnpo)
+            }
+        if ( !("," + $hnpo +",").ToLower().Contains(",webclient,") -or !("," + $npo +",").ToLower().Contains(",webclient,") ) {
+            $npocheck = 'WebClient is missing from provider list' 
+            Write-ToLogWarning ($npomsg + $npocheck + "`r`n`tOrder: " + $npo )
+            }
+#       b.	Third-party providers interfering
+        if ( ($npocheck -eq "Good") -and ($npo.ToLower() -ne $defaultnpo.ToLower()) ) { 
+            $npocheck = 'Order doesn''t match Default' 
+            Write-ToLog ($npomsg + $npocheck + "`r`n`tOrder: " + $npo + "`r`n`tDefault order: $defaultnpo")
+            }
+        if ( $npocheck -eq "Good") { Write-ToLog ($npomsg + $npocheck) }
 
 
         if ($WebAddress.Host.Length -eq 0) {Start-Process ($env:windir + "\explorer.exe")  -ArgumentList $((Get-ChildItem $logfile).DirectoryName) ;Exit}
@@ -337,20 +348,11 @@ function Test-MsDavConnection {
             
 #    3.	Port blocked
         $starttime = Get-Date
-        if ($osver -eq 7 ) 
-        {
-            # New-Object System.Net.Sockets.TcpClient($WebAddress.DnsSafeHost,$WebAddress.Port)
-            $ns = New-Object System.Net.Sockets.TcpClient
-            try { $ns.Connect($WebAddress.DnsSafeHost, $WebAddress.Port ) } catch {}
-            $rtt = (New-TimeSpan $starttime $(Get-Date) ).Milliseconds
-            if( $ns.Connected) {$testconnection = $true; $ns.Close()}
-            $davport = "Win7: "
-        } 
-        else 
-        { 
-            $testconnection = (Test-NetConnection $WebAddress.DnsSafeHost -Port $WebAddress.Port -InformationLevel Quiet)
-            $rtt = (New-TimeSpan $starttime $(Get-Date) ).Milliseconds
-        }
+        # New-Object System.Net.Sockets.TcpClient($WebAddress.DnsSafeHost,$WebAddress.Port)
+        $ns = New-Object System.Net.Sockets.TcpClient
+        try { $ns.Connect($WebAddress.DnsSafeHost, $WebAddress.Port ) } catch {}
+        $rtt = (New-TimeSpan $starttime $(Get-Date) ).Milliseconds
+        if( $ns.Connected) {$testconnection = $true; $ns.Close()}
         $davport = $davport + "Connection to " + $WebAddress.DnsSafeHost + " on port " + $WebAddress.Port + " was " 
         if ($testconnection -eq $true ) { $davport = $davport + "successful and took " + $rtt + " milliseconds" }
         else { $davport = $davport + "not successful"; $rtt=0}
@@ -364,7 +366,13 @@ function Test-MsDavConnection {
         elseif ( $IEPMode -eq 1 ) {$ProtectMode = "Not Enabled"}
         else {$ProtectMode = "Unknown"}
 
-        Write-ToLog ("$WebAddress is in the $IEZone Security Zone and Protect Mode value is " + $ProtectMode + "`n")
+        Write-ToLog ("$WebAddress is in the $IEZone Security Zone and Protect Mode value is " + $ProtectMode + "`r`n")
+
+        $internettestzone = "http://doesntexist.edbarnes.net"
+        if([System.Security.Policy.Zone]::CreateFromUrl($internettestzone).SecurityZone -eq "Internet"){
+            if ( [WebClientTest.WinAPI]::GetProtectedMode($internettestzone) -ne 0 ) {
+            Write-ToLogWarning ("The Internet Security Zone is not enabled for Protect Mode. This is a security risk!`r`n") }
+        }
         
         $ActiveXCheck = $(Get-Item -Path ("HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings\Zones\" + $IEZone.value__)).GetValue('2000')
         if ( $ActiveXCheck -eq 0 ) {$ActiveXEnabled = "Enabled"}
@@ -437,7 +445,7 @@ function Test-MsDavConnection {
 # Failure after connect
 #    1.	Failing Authentication
         if ( $testconnection ) {
-            Write-ToLog ("`n`n" + $dblbar + "`r`nDetermining authentication mode")
+            Write-ToLog ("`n`n" + $dblbar + "`r`n** Determining authentication mode **")
             $global:newlocation = $WebAddress
             $verb = "HEAD"
             $followredirect = $false
@@ -516,7 +524,7 @@ function Test-MsDavConnection {
 
 #    2.	OPTIONS and/or PROPFIND verb blocked
         if ( $testconnection ) {
-            Write-ToLog ("`n`n" + $dblbar + "`r`nCheck if OPTIONS or PROPFIND are blocked")
+            Write-ToLog ("`n`n" + $dblbar + "`r`n** Check if OPTIONS or PROPFIND are blocked **")
             $verb = "OPTIONS"
             $responseresult = SendWebRequest -url $WebAddress -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
             $verb = "PROPFIND"
@@ -532,7 +540,7 @@ function Test-MsDavConnection {
 #        b.	No permissions at root
 #        c.	Root site missing 
             if ($rootweb -ne $WebAddress ){
-                Write-ToLog ("`n`r`n" + $dblbar + "`r`nChecking root site access")
+                Write-ToLog ("`n`r`n" + $dblbar + "`r`n** Checking root site access **")
                 $verb = "PROPFIND"
                 $responseresult = SendWebRequest -url $rootweb -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect  -usecreds $credtype
             }
@@ -541,8 +549,22 @@ function Test-MsDavConnection {
 
 #
 # Performance
-            Write-ToLog ("`n`n" + $dblbar + "`r`nPerformance considerations`r`n" + $dblbar)
-#    1.	Uploads fail to complete or are very slow
+            Write-ToLog ("`r`n" + $dblbar + "`r`n** Performance considerations **")
+#    1.	Slow to browse
+            $verb = "PROPFIND"
+            $responseresult = SendWebRequest -url $WebAddress -verb $verb -useragent $WCuseragent -includecookies $addcookies -follow302 $followredirect -usecreds $credtype -depth 1
+            Write-ToLog "Check browsing performance scenarios (by testing number of discovered items)"
+
+#        a.	Read-Only Win32 attribute on SharePoint folders can cause unnecessary PROPFIND on contents.
+#        b.	Too many items in the destination folder will result in slow response in Windows Explorer (may appear empty)
+            Write-ToLog "`tNumber of items queried: $global:propfindnodecount `r`n"
+            if ($global:propfindnodecount -gt 1000) {
+                Write-ToLogWarning ("`tA high number of items in the folder have been detected")
+                if (($global:propfindnodecount*1000) -gt $WCattribsize){Write-ToLogWarning ("`tIncrease the FileAttributesLimitInBytes value. See KB 912152")}
+            Write-ToLog ("Current setting of FileAttributesLimitInBytes is: " + $WCattribsize.ToString("N0") + " bytes`r`n")
+            }
+
+#    2.	Uploads fail to complete or are very slow
 #        a.	PUT requests are blocked
             # TODO Test PUT
 #        b.	File exceeds file size limit
@@ -558,45 +580,39 @@ function Test-MsDavConnection {
 
             Write-ToLog ("The current client setting for SendReceiveTimeoutInSec is: " + $WCtimeout )
 #        d.	Number of file causes total attribute to exceeds attribute size limit
-            Write-ToLog ("Current setting of FileAttributesLimitInBytes is: " + $WCattribsize.ToString("N0") + " bytes")
+#        	See 2b below
 
-#    2.	Slow to connect
+#    3.	Slow to connect
 #        a.	The WebClient service was not already started
           if ($WCStartType -ne "Automatic") { Write-ToLog "For best performance, set the StartUp Type to 'Automatic'" }
 #        b.	SMB attempts receive no response before falling through to WebClient
-            Write-ToLog "`nTesting SMB connectivity - using UNC will try SMB before using WebDAV and can cause a delay if blocked improperly"
+            Write-ToLog "`nTesting SMB and SMB2 connectivity - using UNC will try SMB before using WebDAV and can cause a delay if blocked improperly"
 
             # New-Object System.Net.Sockets.TcpClient($WebAddress.DnsSafeHost,$WebAddress.Port)
             $ns = New-Object system.net.sockets.tcpclient
 
-			$start = Get-Date
+			$starttime = Get-Date
             try { $ns.Connect($WebAddress.DnsSafeHost, 139 ) } catch {}
             $smbresponsetime = (New-TimeSpan $starttime $(Get-Date) ).Seconds
             $ns.Close()
 
-            $smb = "SMB test connection took " + $smbresponsetime + " seconds"
-			if ($smbresponsetime -gt 3) {Write-ToLogWarning ($smb) }
+            $smb = "`tSMB test connection took " + $smbresponsetime + " seconds"
+			if ($smbresponsetime -gt 30) {Write-ToLogWarning ($smb) }
             else { Write-ToLog ($smb) }
 
-			$start = Get-Date
-            try { $ns.Connect($WebAddress.DnsSafeHost, 445 ) } catch {}
-            $smb2responsetime = (New-TimeSpan $starttime $(Get-Date) ).Seconds
-            $ns.Close()
+            $ns2 = New-Object system.net.sockets.tcpclient
+			$starttime2 = Get-Date
+            try { $ns2.Connect($WebAddress.DnsSafeHost, 445 ) } catch {}
+            $smb2responsetime = (New-TimeSpan $starttime2 $(Get-Date) ).Seconds
+            $ns2.Close()
 
-            $smb2 = "SMB2 test connection took " + $smb2responsetime + " seconds"
-			if ($smb2responsetime -gt 15) {Write-ToLogWarning ($smb2) }
+            $smb2 = "`tSMB2 test connection took " + $smb2responsetime + " seconds"
+			if ($smb2responsetime -gt 30) {Write-ToLogWarning ($smb2) }
             else { Write-ToLog ($smb2) }
+
 
 #        c.	Auto-detect proxy unnecessarily selected
             Write-ToLogVerbose "`nTODO: Auto-detect proxy`n"
-
-#    3.	Slow to browse
-            Write-ToLogVerbose "TODO: Check browsing performance scenarios`n"
-
-#        a.	Read-Only Win32 attribute on SharePoint folders can cause unnecessary PROPFIND on contents.
-#        b.	Too many items in the destination folder will result in slow response in Windows Explorer (may appear empty)
-
-
 
 #        return New-Object PsObject -Property $MsDavConnection
      }
@@ -604,9 +620,10 @@ function Test-MsDavConnection {
 }
 
 
-function SendWebRequest([uri] $url, [string] $verb, [string] $useragent, $includecookies = $false, $follow302=$true, [string] $usecreds)
+function SendWebRequest([uri] $url, [string] $verb, [string] $useragent, $includecookies = $false, $follow302=$true, [string] $usecreds, $depth=0)
 {
-    Write-ToLog ($dblbar + "`r`n`r`n" + $verb + " test to $url")
+    if ($depth){$depthnotice = " with Depth of 1"} else { $depthnotice = ""}
+    Write-ToLog ($dblbar + "`r`n`r`n" + $verb + " test to $url" + $depthnotice)
     Write-ToLogVerbose ("`tUserAgent: " + $useragent + " Cookies:" + $includecookies + " Follow302:" + $follow302 + " CredType:" + $usecreds)
 
     [net.httpWebRequest] $req = [net.webRequest]::Create($url)
@@ -634,7 +651,7 @@ function SendWebRequest([uri] $url, [string] $verb, [string] $useragent, $includ
 	$req.AllowAutoRedirect = $follow302
 	$req.Method = $verb
     if ( $useragent -ne $null ) {$req.UserAgent = $useragent}
-    if ( $req.Method -eq "PROPFIND" ) { $req.Headers["Depth"] = 0 }
+    if ( $req.Method -eq "PROPFIND" ) { $req.Headers["Depth"] = $depth }
 
 	#Get Response
 	try {
@@ -655,19 +672,19 @@ function SendWebRequest([uri] $url, [string] $verb, [string] $useragent, $includ
 
     if ($res -ne $null)
     {
-        Write-ToLog ("Response Status Code: " + $res.StatusCode.value__ + " " + $res.StatusCode)
-        Write-ToLogVerbose ("Response Cookies: " + $res.Cookies.Count)
-        foreach ($c in $res.Cookies) { Write-ToLogVerbose ("`t" + $c.Name + " " + $c.Value) }
+        Write-ToLog ("`tResponse Status Code: " + $res.StatusCode.value__ + " " + $res.StatusCode)
+        Write-ToLogVerbose ("`tResponse Cookies: " + $res.Cookies.Count)
+        foreach ($c in $res.Cookies) { Write-ToLogVerbose ("`t`t" + $c.Name + " " + $c.Value) }
 
-        Write-ToLogVerbose ("Response Headers: " + $res.Headers.Count)
+        Write-ToLogVerbose ("`tResponse Headers: " + $res.Headers.Count)
         foreach ($h in $res.Headers)
         {
             
             switch -Wildcard($h){
                 "WWW-Authenticate" { 
-                    Write-ToLogVerbose ("`t" + $h )
+                    Write-ToLogVerbose ("`t`t" + $h )
                     foreach ($a in $res.Headers.GetValues($h)) {
-                        Write-ToLogVerbose "`t`t"$a
+                        Write-ToLogVerbose "`t`t`t"$a
                         if ($a -like "NTLM*") { $global:auth_ntlm = $true }
                         if ($a -like "Nego*") { $global:auth_nego = $true }
                         if ($a -like "Basic*") { $global:auth_basic = $true }
@@ -676,25 +693,32 @@ function SendWebRequest([uri] $url, [string] $verb, [string] $useragent, $includ
                         }
                     Break
                     }
-                "MicrosoftSharePointTeamServices" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "MicrosoftSharePointTeamServices" { Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 "Set-Cookie" { 
-                    Write-ToLogVerbose ("`t" + $h)
+                    Write-ToLogVerbose ("`t`t" + $h)
                     foreach ($c in $res.Headers.GetValues($h)) {
-                        Write-ToLogVerbose ("`t`t" + $c)
+                        Write-ToLogVerbose ("`t`t`t" + $c)
                         }
                     Break
                     }
-                "Allow" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "Date" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "Location" { $newlocation = $res.Headers.GetValues($h) ;Write-ToLogVerbose ("`t" + $h + ":`t" + $newlocation) ; Break }
-                "Content-Type" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "Content-Encoding" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "request-id" { Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Allow" { Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Date" { Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Location" { $newlocation = $res.Headers.GetValues($h) ;Write-ToLogVerbose ("`t`t" + $h + ":`t" + $newlocation) ; Break }
+                "Content-Type" { Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "Content-Encoding" { Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "request-id" { Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
                 # X-MSDAVEXT_Error: 917656; Access+denied.+Before+opening+files+in+this+location%2c+you+must+first+browse+to+the+web+site+and+select+the+option+to+login+automatically.
-                "X-MSDAVEXT_Error" { $global:auth_fba = $true ; Write-ToLogWarning ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "X-FORMS_BASED_AUTH_REQUIRED" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "FORMS_BASED_AUTH_RETURN_URL" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
-                "*" { Write-ToLogVerbose ("`t? " + $h + ": " + $res.Headers.GetValues($h))}
+                "X-MSDAVEXT_Error" { 
+                    $global:auth_fba = $true ; 
+                    if ($includecookies){
+                        Write-ToLogWarning ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h))
+                    }
+                        Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h))
+                    Break 
+                    }
+                "X-FORMS_BASED_AUTH_REQUIRED" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "FORMS_BASED_AUTH_RETURN_URL" { $global:auth_fba = $true ; Write-ToLogVerbose ("`t`t" + $h + ":`t" + $res.Headers.GetValues($h)) ; Break }
+                "*" { Write-ToLogVerbose ("`t`t? " + $h + ": " + $res.Headers.GetValues($h))}
             }
         }
         $statcode = $res.StatusCode.value__ 
@@ -740,11 +764,16 @@ function ReturnBody($response)
     }
     # Test if body is valid XML
 
-# Check for Load or Parse errors when loading the XML file
+    # Check for Load or Parse errors when loading the XML file
     $xml = New-Object System.Xml.XmlDocument
     try {
         $xml.LoadXml($body)
-        Write-ToLog "PROPFIND response is valid XML"
+        Write-ToLog "`tPROPFIND response is valid XML"
+        $nodecnt = $xml.ChildNodes.response.Count - 1
+        if ($nodecnt -gt $global:propfindnodecount){
+            $global:propfindnodecount = $nodecnt
+            Write-ToLogVerbose "`tNumber of items: $nodecnt"
+        }
     }
     catch [System.Xml.XmlException] {
         Write-ToLogWarning "PROPFIND response is not valid XML: $($_.toString())"
