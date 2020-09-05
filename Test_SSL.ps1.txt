@@ -1,0 +1,183 @@
+﻿$WebAddress = [uri] 'https://www.bing.com'
+
+$IgnoreBadCert = $true
+
+$WinHTTPsrc = @'
+// referencing values from https://github.com/libgit2/libgit2/blob/master/deps/winhttp/winhttp.h
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern IntPtr WinHttpOpen( [MarshalAs(UnmanagedType.LPWStr)] string pwszAgent, int   dwAccessType,
+            [MarshalAs(UnmanagedType.LPWStr)] string pwszProxy, [MarshalAs(UnmanagedType.LPWStr)] string pwszProxyBypass, int dwFlags );
+
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern IntPtr WinHttpOpenRequest( IntPtr hConnect, [MarshalAs(UnmanagedType.LPWStr)] string pwszVerb, [MarshalAs(UnmanagedType.LPWStr)] string pwszObjectName,
+            [MarshalAs(UnmanagedType.LPWStr)] string pwszVersion, [MarshalAs(UnmanagedType.LPWStr)] string pwszReferrer, ref byte[] ppwszAcceptTypes, int dwFlags);
+
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern IntPtr WinHttpConnect(IntPtr hSession, [MarshalAs(UnmanagedType.LPWStr)] string pswzServerName, short nServerPort, int dwReserved);
+
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern bool WinHttpSetOption( IntPtr hInternet, int dwOption, byte[] lpBuffer, int dwBufferLength );
+
+    [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    static extern bool WinHttpSendRequest( IntPtr hRequest, string pwszHeaders, int dwHeadersLength, string lpOptional, uint dwOptionalLength, uint dwTotalLength, int dwContext );
+
+    [DllImport("winhttp.dll", SetLastError=true)]
+    static extern bool WinHttpReceiveResponse(IntPtr hRequest, int lpReserved);
+
+    [DllImport("winhttp.dll", SetLastError=true)]
+    static extern bool WinHttpCloseHandle(IntPtr hInternet);
+
+    static int WINHTTP_FLAG_SECURE = 0x00800000;
+    static int WINHTTP_OPTION_SECURE_PROTOCOLS = 84;
+    public static int WINHTTP_FLAG_SECURE_PROTOCOL_SSL3 = 0x00000020;    // decimal 32
+    public static int WINHTTP_FLAG_SECURE_PROTOCOL_TLS1 = 0x00000080;    // decimal 128
+    public static int WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_1 = 0x00000200;  // decimal 512
+    public static int WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 = 0x00000800;  // decimal 2048
+
+    static int WINHTTP_ACCESS_TYPE_DEFAULT_PROXY = 0;
+    //static int WINHTTP_ACCESS_TYPE_NO_PROXY = 1;
+    //static int WINHTTP_ACCESS_TYPE_NAMED_PROXY = 3;
+
+    static int WINHTTP_OPTION_SECURITY_FLAGS = 31;
+    static int SECURITY_FLAG_IGNORE_UNKNOWN_CA = 0x00000100;
+    static int SECURITY_FLAG_IGNORE_CERT_DATE_INVALID = 0x00002000;
+    static int SECURITY_FLAG_IGNORE_CERT_CN_INVALID = 0x00001000;
+    static int SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE = 0x00000200;
+    static int SECURITY_FLAG_IGNORE_ALL = SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_IGNORE_CERT_DATE_INVALID|SECURITY_FLAG_IGNORE_CERT_CN_INVALID|SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
+
+    static byte[] WINHTTP_DEFAULT_ACCEPT_TYPES = null;
+    static string WINHTTP_NO_ADDITIONAL_HEADERS = null;
+    static string WINHTTP_NO_REQUEST_DATA = null;
+    static string WINHTTP_NO_REFERER = null;
+    static string WINHTTP_NO_PROXY_NAME = null;
+    static string WINHTTP_NO_PROXY_BYPASS = null;
+
+    public static int TestSsl(string url, short port, int ssl, bool bIgnoreBadCert)
+    {
+        int iResult = 0;
+        IntPtr hSession = WinHttpOpen("WinHTTP SSL Test", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if( hSession != null ) {
+            IntPtr hConnect = WinHttpConnect( hSession, url, port, 0 );
+            if( hConnect != null ) {
+                IntPtr hRequest = WinHttpOpenRequest( hConnect, "GET", "/", null, WINHTTP_NO_REFERER, ref WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+                if( hRequest == null ) {
+                    iResult = Marshal.GetLastWin32Error();
+                    Console.Write( "The Open request returned error {0}. ", iResult);
+                    }
+                if (!WinHttpSetOption( hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, BitConverter.GetBytes(ssl), sizeof(int) )) Console.WriteLine( "Failed to set SSL");
+                if ( bIgnoreBadCert ) {
+                    if (!WinHttpSetOption( hRequest, WINHTTP_OPTION_SECURITY_FLAGS, BitConverter.GetBytes(SECURITY_FLAG_IGNORE_ALL), sizeof(int) )) Console.WriteLine( "Failed to set Ignore Bad Cert");
+                    };
+                if (!WinHttpSendRequest( hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0 ) ){
+                    iResult = Marshal.GetLastWin32Error();
+                    Console.Write( "The Send request returned error {0}. ", iResult);
+                    };
+                if( hRequest != null ) WinHttpCloseHandle( hRequest );
+                };
+            if( hConnect != null ) WinHttpCloseHandle( hConnect );
+            if( hSession != null ) WinHttpCloseHandle( hSession );
+        };
+        return iResult;
+    }
+'@ 
+
+Add-Type -MemberDefinition $WinHTTPsrc  -Namespace WinHTTP -Name WinAPI 
+
+function Write-ToLog()
+{   param( $msg = "`n" )
+    Write-Host $msg
+    Add-Content $logfile -Value $msg
+}
+function Write-ToLogVerbose()
+{   param( $msg = "`n" )
+    if ($global:outputverbose ) { Write-Verbose $msg}
+    Add-Content $logfile -Value ("VERBOSE:`t"+$msg)
+}
+function Write-ToLogWarning()
+{   param( $msg = "`n" )
+    Write-Warning $msg
+    Add-Content $logfile -Value ($global:dblbar)
+    Add-Content $logfile -Value ("WARNING:`n`t"+$msg)
+    Add-Content $logfile -Value ($global:dblbar)
+}
+function Test-SslCert {
+    param(
+        [Parameter(
+            Mandatory=$true,
+            ValueFromPipelineByPropertyName=$true,
+            ValueFromPipeline=$true
+        )]$destHostName,
+        [Parameter(
+            ValueFromPipelineByPropertyName=$true
+        )][int]$destPort = 443,
+        [ValidateSet("SSL3", "TLS", "TLS11", "TLS12", IgnoreCase = $true)]
+        [Parameter(
+            ValueFromPipelineByPropertyName=$true
+        )]$destProtocol = "TLS12"
+    )
+
+    $Callback = { param($sender, $cert, $chain, $errors) return $true }
+    $Socket = New-Object System.Net.Sockets.Socket('Internetwork','Stream', 'Tcp')
+    $Socket.Connect($destHostName, $destPort)
+    try {
+        $NetStream = New-Object System.Net.Sockets.NetworkStream($Socket, $true)
+        $SslStream = New-Object System.Net.Security.SslStream($NetStream, $true, $Callback)
+        $SslStream.AuthenticateAsClient($destHostName,  $null, $destProtocol, $false )
+        $RemoteCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]$SslStream.RemoteCertificate
+        Write-ToLog  ("`r`nCertificate Information" )
+        Write-ToLog  ("=======================" )
+        Write-ToLog  ('Cert info - Not Before: ' + $RemoteCertificate.NotBefore )
+        Write-ToLog  ('Cert info - Not After: ' + $RemoteCertificate.NotAfter )
+        Write-ToLog  ('Cert info - Subject: ' + $RemoteCertificate.GetNameInfo(3,$false) )
+        #Write-ToLog  ('Cert info - Distinguished Name: ' + $RemoteCertificate.SubjectName.Name )
+        Write-ToLog  ('Cert info - Issuer: ' + $RemoteCertificate.GetNameInfo(3,$true) )
+        Write-ToLog  ('Cert info - Issuer Distinguished Name: ' + $RemoteCertificate.IssuerName.Name )
+        Write-ToLog  ('Cert info - Usage: ' + $RemoteCertificate.EnhancedKeyUsageList )
+         Write-ToLog  ('Cert info - Host name(s): ' + $RemoteCertificate.DnsNameList)
+   } 
+    catch {
+        $_.Exception
+    }
+    finally {
+        $SslStream.Close()
+        $NetStream.Close()
+    }
+    
+}
+
+# Test version of SSL/TLS supported by destination server
+    $ServerProtocolsAccepted = $null; [int] $iBestSsl = 0;
+    if ([WinHTTP.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 128, $IgnoreBadCert ) -eq 0 ) 
+        { Write-ToLogVerbose "The server supports TLS 1.0"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS1" ; $iBestSsl = 128 ; $sBestSsl = "TLS1" } 
+    else { Write-ToLog "The server does not support TLS 1.0" }
+
+    if ([WinHTTP.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 512, $IgnoreBadCert ) -eq 0 ) 
+        { Write-ToLogVerbose "The server supports TLS 1.1"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS11" ; $iBestSsl = 512 ; $sBestSsl = "TLS11" } 
+    else { Write-ToLog "The server does not support TLS 1.1" }
+
+    if ([WinHTTP.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, 2048, $IgnoreBadCert ) -eq 0 ) 
+        { Write-ToLogVerbose "The server supports TLS 1.2"; $ServerProtocolsAccepted = $ServerProtocolsAccepted + " TLS12" ; $iBestSsl = 2048 ; $sBestSsl = "TLS12" } 
+    else { Write-ToLog "The server does not support TLS 1.2" }
+
+    if ($ServerProtocolsAccepted -eq $null) {Write-ToLog "No attempted protocols succeeded"}
+    else {$ServerProtocolsAccepted = $ServerProtocolsAccepted.Substring(1); Write-ToLog ( "Server supports: " + $ServerProtocolsAccepted.ToUpper() ) }
+
+    if ($iBestSsl -gt 0 ) {
+        $certcheck = [WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, $iBestSsl, $true )
+        if ($certcheck -eq 0 ) 
+            { Write-ToLogVerbose "No certificate problem observed"} 
+        else { 
+            switch ($certcheck ) {
+                "12037"  { Write-ToLog "Certificate Error Invalid Date" }
+                "12038"  { Write-ToLog "Certificate Error Invalid Common Name" }
+                "12044"  { Write-ToLog "Client Authentication Certificate Needed" }
+                "12045"  { Write-ToLog "Certificate CA is Invalid" }
+                "12169"  { Write-ToLog "Invalid Certificate" }       
+                "12179"  { Write-ToLog "Invalid Usage for Certificate" } 
+                default  { Write-ToLog "Certificate failure: $certcheck" }                    
+                }
+            }
+        Test-SslCert $WebAddress.DnsSafeHost $WebAddress.Port
+                
+        # Optional ToDo - Check cert chain
+    }
