@@ -1,7 +1,7 @@
 ﻿$WebAddress = [uri] 'https://www.bing.com'
 
 $IgnoreBadCert = $true
-
+$logfile = "$env:TEMP\"+$env:COMPUTERNAME+"_"+(Get-Date -Format yyMMddhhmm)+".log"
 $WinHTTPsrc = @'
 // referencing values from https://github.com/libgit2/libgit2/blob/master/deps/winhttp/winhttp.h
     [DllImport("winhttp.dll", SetLastError=true, CharSet=CharSet.Auto)]
@@ -163,7 +163,7 @@ function Test-SslCert {
     else {$ServerProtocolsAccepted = $ServerProtocolsAccepted.Substring(1); Write-ToLog ( "Server supports: " + $ServerProtocolsAccepted.ToUpper() ) }
 
     if ($iBestSsl -gt 0 ) {
-        $certcheck = [WebClientTest.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, $iBestSsl, $true )
+        $certcheck = [WinHTTP.WinAPI]::TestSsl($WebAddress.DnsSafeHost, $WebAddress.Port, $iBestSsl, $true )
         if ($certcheck -eq 0 ) 
             { Write-ToLogVerbose "No certificate problem observed"} 
         else { 
